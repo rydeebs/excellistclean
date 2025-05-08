@@ -445,11 +445,11 @@ def manual_entry_form(df):
                         if current_val:
                             try:
                                 date_val = pd.to_datetime(current_val)
-                                new_val = st.date_input(f"{col}", date_val)
+                                new_val = st.date_input(f"{col}", date_val, key=f"date_{idx}_{i}")
                             except:
-                                new_val = st.date_input(f"{col}")
+                                new_val = st.date_input(f"{col}", key=f"date_{idx}_{i}")
                         else:
-                            new_val = st.date_input(f"{col}")
+                            new_val = st.date_input(f"{col}", key=f"date_{idx}_{i}")
                         updated_values[col] = new_val.strftime('%Y-%m-%d') if new_val else None
                     elif col == 'State':
                         states = ["", "AL", "AK", "AZ", "AR", "CA", "CO", "CT", "DE", "FL", "GA", 
@@ -457,21 +457,20 @@ def manual_entry_form(df):
                                  "MA", "MI", "MN", "MS", "MO", "MT", "NE", "NV", "NH", "NJ", 
                                  "NM", "NY", "NC", "ND", "OH", "OK", "OR", "PA", "RI", "SC", 
                                  "SD", "TN", "TX", "UT", "VT", "VA", "WA", "WV", "WI", "WY", "DC"]
-                        new_val = st.selectbox(f"{col}", states, index=0 if not current_val else states.index(current_val))
+                        new_val = st.selectbox(f"{col}", states, index=0 if not current_val else states.index(current_val), key=f"state_{idx}_{i}")
                         updated_values[col] = new_val if new_val else None
                     elif col == 'Category':
-                        # Try to suggest categories based on existing data
                         existing_categories = df['Category'].dropna().unique().tolist()
                         categories = [""] + existing_categories
                         new_val = st.selectbox(f"{col}", categories, index=0 if not current_val else 
-                                             categories.index(current_val) if current_val in categories else 0)
+                                             categories.index(current_val) if current_val in categories else 0, key=f"category_{idx}_{i}")
                         updated_values[col] = new_val if new_val else None
                     else:
-                        new_val = st.text_input(f"{col}", current_val)
+                        new_val = st.text_input(f"{col}", current_val, key=f"text_{idx}_{i}")
                         updated_values[col] = new_val if new_val else None
                 
                 # Update button
-                if st.button(f"Update Tournament {i+1}"):
+                if st.button(f"Update Tournament {i+1}", key=f"button_{idx}_{i}"):
                     for col, val in updated_values.items():
                         df.at[idx, col] = val
                     st.success(f"Tournament {i+1} updated!")
