@@ -247,24 +247,19 @@ def standardize_tournament_names(df):
         if pd.isna(name):
             continue
             
-        # Look for common tournament types
-        if 'championship' in name.lower():
-            cleaned_df.at[idx, 'Category'] = 'Championship'
-        elif 'amateur' in name.lower():
-            cleaned_df.at[idx, 'Category'] = 'Amateur'
-        elif 'open' in name.lower():
-            cleaned_df.at[idx, 'Category'] = 'Open'
-        elif 'invitational' in name.lower():
-            cleaned_df.at[idx, 'Category'] = 'Invitational'
-        elif 'classic' in name.lower():
-            cleaned_df.at[idx, 'Category'] = 'Classic'
-        elif 'pro-am' in name.lower() or 'proam' in name.lower():
-            cleaned_df.at[idx, 'Category'] = 'Pro-Am'
-        elif 'four-ball' in name.lower() or 'fourball' in name.lower():
-            cleaned_df.at[idx, 'Category'] = 'Four-Ball'
-        elif 'scramble' in name.lower():
-            cleaned_df.at[idx, 'Category'] = 'Scramble'
-    
+        # Look for specified tournament categories
+        name_lower = name.lower()
+        if 'senior' in name_lower or 'seniors' in name_lower:
+            cleaned_df.at[idx, 'Category'] = "Seniors"
+        elif "men's" in name_lower or "mens" in name_lower:
+            cleaned_df.at[idx, 'Category'] = "Men's"
+        elif 'amateur' in name_lower:
+            cleaned_df.at[idx, 'Category'] = "Amateur"
+        elif "junior's" in name_lower or "juniors" in name_lower or "junior" in name_lower:
+            cleaned_df.at[idx, 'Category'] = "Junior's"
+        elif "women's" in name_lower or "womens" in name_lower or "ladies" in name_lower:
+            cleaned_df.at[idx, 'Category'] = "Women's"
+        
     return cleaned_df
 
 def fill_missing_data(df):
@@ -305,6 +300,39 @@ def fill_missing_data(df):
         filled_df['Category'] = filled_df['Category'].fillna('Regular')
     
     return filled_df
+
+def manual_entry_widget(df):
+    st.subheader("Fill Missing Data")
+    for idx, row in df.iterrows():
+        missing_cols = [col for col in REQUIRED_COLUMNS if pd.isna(row[col])]
+        if missing_cols:
+            st.write(f"**Tournament {idx+1}:** {row['Name']}")
+            cols = st.columns(min(3, len(missing_cols)))
+            updates = {}
+            for i, col in enumerate(missing_cols):
+                widget_key = f"{col}_{idx}_{row['Name']}"
+                with cols[i % 3]:
+                    if col == 'Date':
+                        date_val = st.date_input(f"{col} for {row['Name']}", key=widget_key)
+                        updates[col] = date_val.strftime('%Y-%m-%d')
+                    elif col == 'State':
+                        states = ["", "AL", "AK", "AZ", "AR", "CA", "CO", "CT", "DE", "FL", "GA", 
+                                 "HI", "ID", "IL", "IN", "IA", "KS", "KY", "LA", "ME", "MD", 
+                                 "MA", "MI", "MN", "MS", "MO", "MT", "NE", "NV", "NH", "NJ", 
+                                 "NM", "NY", "NC", "ND", "OH", "OK", "OR", "PA", "RI", "SC", 
+                                 "SD", "TN", "TX", "UT", "VT", "VA", "WA", "WV", "WI", "WY", "DC"]
+                        updates[col] = st.selectbox(f"{col} for {row['Name']}", states, index=0, key=widget_key)
+                    elif col == 'Category':
+                        categories = ["Regular", "Championship", "Amateur", "Open", "Invitational", 
+                                    "Classic", "Pro-Am", "Four-Ball", "Scramble"]
+                        updates[col] = st.selectbox(f"{col} for {row['Name']}", categories, index=0, key=widget_key)
+                    else:
+                        updates[col] = st.text_input(f"{col} for {row['Name']}", key=widget_key)
+            if st.button(f"Update Tournament {idx+1}", key=f"update_{idx}_{row['Name']}"):
+                for col, val in updates.items():
+                    df.at[idx, col] = val
+                st.success(f"Tournament {idx+1} updated!")
+    return df
 
 # Main application layout
 st.subheader("Enter Tournament Text Data")
@@ -347,7 +375,9 @@ if uploaded_file is not None:
 # Year input
 year = st.text_input("Tournament Year (if not specified in text):", "2025")
 
-# Process button
+# File naming option
+output_filename = st.text_input("Output Filename (without extension):", "golf_tournaments")
+
 if st.button("Process Tournament Data"):
     if tournament_text:
         try:
@@ -388,55 +418,14 @@ if st.button("Process Tournament Data"):
             st.dataframe(missing_df)
             
             # Manual data entry for missing fields
-            st.subheader("Fill Missing Data")
-            
-            # For each tournament with missing data
-            for idx, row in df.iterrows():
-                missing_cols = [col for col in REQUIRED_COLUMNS if pd.isna(row[col])]
-                
-                if missing_cols:
-                    st.write(f"**Tournament {idx+1}:** {row['Name']}")
-                    
-                    # Create columns for form layout
-                    cols = st.columns(min(3, len(missing_cols)))
-                    
-                    # Create form fields for each missing column
-                    updates = {}
-                    for i, col in enumerate(missing_cols):
-                        with cols[i % 3]:
-                            if col == 'Date':
-                                # Date picker
-                                date_val = st.date_input(f"{col} for {row['Name']}")
-                                updates[col] = date_val.strftime('%Y-%m-%d')
-                            elif col == 'State':
-                                # State dropdown
-                                states = ["", "AL", "AK", "AZ", "AR", "CA", "CO", "CT", "DE", "FL", "GA", 
-                                         "HI", "ID", "IL", "IN", "IA", "KS", "KY", "LA", "ME", "MD", 
-                                         "MA", "MI", "MN", "MS", "MO", "MT", "NE", "NV", "NH", "NJ", 
-                                         "NM", "NY", "NC", "ND", "OH", "OK", "OR", "PA", "RI", "SC", 
-                                         "SD", "TN", "TX", "UT", "VT", "VA", "WA", "WV", "WI", "WY", "DC"]
-                                updates[col] = st.selectbox(f"{col} for {row['Name']}", states, index=0)
-                            elif col == 'Category':
-                                # Category dropdown
-                                categories = ["Regular", "Championship", "Amateur", "Open", "Invitational", 
-                                            "Classic", "Pro-Am", "Four-Ball", "Scramble"]
-                                updates[col] = st.selectbox(f"{col} for {row['Name']}", categories, index=0)
-                            else:
-                                # Text input for other fields
-                                updates[col] = st.text_input(f"{col} for {row['Name']}")
-                    
-                    # Update button
-                    if st.button(f"Update Tournament {idx+1}"):
-                        for col, val in updates.items():
-                            df.at[idx, col] = val
-                        st.success(f"Tournament {idx+1} updated!")
+            df = manual_entry_widget(df)
             
             # Create download buttons for the data
             csv = df.to_csv(index=False)
             st.download_button(
                 label="Download CSV",
                 data=csv,
-                file_name="golf_tournaments.csv",
+                file_name=f"{output_filename}.csv",
                 mime="text/csv"
             )
             
@@ -450,13 +439,13 @@ if st.button("Process Tournament Data"):
                 for i, col in enumerate(df.columns):
                     max_len = max(df[col].astype(str).apply(len).max(), len(col)) + 2
                     worksheet.set_column(i, i, max_len)
-            
+
             buffer.seek(0)
-            
+
             st.download_button(
-                label="Download Excel",
+                label="Download Excel", 
                 data=buffer,
-                file_name="golf_tournaments.xlsx",
+                file_name=f"{output_filename}.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
             
