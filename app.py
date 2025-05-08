@@ -4,6 +4,32 @@ import numpy as np
 import re
 from datetime import datetime
 import io
+import importlib.util
+import sys
+
+# Check for required dependencies
+def check_dependencies():
+    missing_deps = []
+    for package in ['openpyxl', 'xlsxwriter']:
+        if importlib.util.find_spec(package) is None:
+            missing_deps.append(package)
+    return missing_deps
+
+# Display dependency installation instructions if needed
+missing_dependencies = check_dependencies()
+if missing_dependencies:
+    st.error(f"Missing required dependencies: {', '.join(missing_dependencies)}")
+    st.write("""
+    ### Installation Instructions:
+    
+    Please install the missing dependencies by running the following command in your terminal:
+    ```
+    pip install {0}
+    ```
+    
+    Then restart the Streamlit app.
+    """.format(' '.join(missing_dependencies)))
+    st.stop()
 
 st.set_page_config(page_title="Golf Tournament Data Cleaner", layout="wide")
 
