@@ -5,20 +5,24 @@ import re
 from datetime import datetime
 import io
 
-st.set_page_config(page_title="Golf Tournament CSV Cleaner", layout="wide")
+st.set_page_config(page_title="Golf Tournament Data Cleaner", layout="wide")
 
-st.title("Golf Tournament CSV Cleaner")
-st.write("Upload your golf tournament CSV files to clean and standardize the data.")
+st.title("Golf Tournament Data Cleaner")
+st.write("Upload your golf tournament Excel files to clean and standardize the data.")
 
 # Required columns
 REQUIRED_COLUMNS = ["Date", "Name", "Course", "Category", "City", "State", "Zip"]
 
-def standardize_date(date_str):
+def standardize_date(date_val):
     """Convert various date formats to YYYY-MM-DD format."""
-    if pd.isna(date_str):
+    if pd.isna(date_val):
         return None
     
-    date_str = str(date_str).strip()
+    # If already a datetime object (Excel dates are often parsed as datetime)
+    if isinstance(date_val, (datetime, pd.Timestamp)):
+        return date_val.strftime('%Y-%m-%d')
+    
+    date_str = str(date_val).strip()
     
     # Try different date formats
     date_formats = [
@@ -93,34 +97,227 @@ def standardize_zip(zip_str):
     
     return zip_str
 
-def extract_location_data(df):
-    """Attempt to extract city, state, zip from location columns."""
-    # Look for columns that might contain location information
-    location_cols = [col for col in df.columns if any(x in col.lower() for x in ['location', 'address', 'city', 'state', 'zip'])]
+def extract_location_from_col(df, col):
+    """Extract city, state, zip from a single column."""
+    # Try to extract city, state, zip from a location column
+    # Pattern: "City, ST ZIPCODE" or "City, State ZIPCODE"
+    location_pattern = r'([^,]+),\s*([A-Za-z]{2}|\w+)\s+(\d{5}(?:-\d{4})?)?'
     
-    if not location_cols:
+    if col not in df.columns:
         return df
     
-    # Try to extract city, state, zip from location columns
-    for col in location_cols:
-        if 'city' not in df.columns.str.lower() and 'city' in col.lower():
-            df['City'] = df[col]
-        elif 'state' not in df.columns.str.lower() and 'state' in col.lower():
-            df['State'] = df[col].apply(standardize_state)
-        elif 'zip' not in df.columns.str.lower() and 'zip' in col.lower():
-            df['Zip'] = df[col].apply(standardize_zip)
-        elif 'location' in col.lower() or 'address' in col.lower():
-            # Try to extract city, state, zip from location/address column
-            if 'City' not in df.columns:
-                df['City'] = df[col].str.extract(r'([A-Za-z\s]+),')
-            if 'State' not in df.columns:
-                df['State'] = df[col].str.extract(r',\s*([A-Za-z]{2})')
-                df['State'] = df['State'].apply(standardize_state)
-            if 'Zip' not in df.columns:
-                df['Zip'] = df[col].str.extract(r'(\d{5}(?:-\d{4})?)')
-                df['Zip'] = df['Zip'].apply(standardize_zip)
+    # Apply extraction where possible
+    mask = df[col].notna()
+    if mask.any():
+        matches = df.loc[mask, col].astype(str).str.extract(location_pattern)
+        
+        if matches is not None and not matches.empty:
+            # City (first group)
+            if 'City' not in df.columns and not matches[0].isna().all():
+                df.loc[mask, 'City'] = matches[0]
+            
+            # State (second group)
+            if 'State' not in df.columns and not matches[1].isna().all():
+                df.loc[mask, 'State'] = matches[1].apply(standardize_state)
+            
+            # Zip (third group)
+            if 'Zip' not in df.columns and not matches[2].isna().all():
+                df.loc[mask, 'Zip'] = matches[2].apply(standardize_zip)
     
     return df
+
+def detect_tournament_groups(df):
+    """Attempt to detect tournament groups in the data."""
+    # Check if there are empty rows that might separate tournament groups
+    empty_rows = df.isna().all(axis=1)
+    if empty_rows.any():
+        # Use empty rows as separators
+        group_indices = np.where(empty_rows)[0]
+        
+        # Create a list to hold tournament groups
+        tournament_groups = []
+        
+        # Extract each group
+        start_idx = 0
+        for end_idx in group_indices:
+            if end_idx > start_idx:  # Ensure there's actual data
+                group_df = df.iloc[start_idx:end_idx].reset_index(drop=True)
+                if not group_df.empty:
+                    tournament_groups.append(group_df)
+            start_idx = end_idx + 1
+        
+        # Don't forget the last group
+        if start_idx < len(df):
+            group_df = df.iloc[start_idx:].reset_index(drop=True)
+            if not group_df.empty:
+                tournament_groups.append(group_df)
+        
+        return tournament_groups
+    
+    # If no empty rows, check if there's a 'Tournament' or 'Name' column
+    # that might indicate different tournaments
+    for col in ['Tournament', 'Name', 'Event']:
+        if col in df.columns:
+            if not df[col].isna().all():
+                # Group by tournament name
+                grouped = df.groupby(col, dropna=False)
+                return [group.reset_index(drop=True) for _, group in grouped]
+    
+    # If we can't detect groups, return the entire DataFrame as one group
+    return [df]
+
+def extract_tournament_info(group_df):
+    """Extract tournament info from a group of rows."""
+    # Initialize a dictionary to hold tournament info
+    tournament_info = {col: None for col in REQUIRED_COLUMNS}
+    
+    # Function to normalize column names for matching
+    def normalize_col(col):
+        return col.lower().replace(' ', '_')
+    
+    # Map of normalized column names to required columns
+    col_mapping = {
+        'tournament': 'Name', 'event': 'Name', 
+        'tournament_name': 'Name', 'event_name': 'Name',
+        'golf_course': 'Course', 'course_name': 'Course', 
+        'tournament_type': 'Category', 'event_type': 'Category', 'type': 'Category',
+        'tournament_date': 'Date', 'event_date': 'Date',
+        'zip_code': 'Zip', 'zipcode': 'Zip', 'postal_code': 'Zip',
+        'st': 'State', 'location': 'City'
+    }
+    
+    # First, try to find values in column headers and first row
+    if not group_df.empty:
+        # Check for column structures like "Name | Value"
+        for col in group_df.columns:
+            if ':' in str(col) or '|' in str(col):
+                parts = re.split(r'[:|]', str(col))
+                if len(parts) == 2:
+                    key = parts[0].strip()
+                    value = parts[1].strip()
+                    
+                    # Map to required column if possible
+                    for req_col in REQUIRED_COLUMNS:
+                        if req_col.lower() in key.lower():
+                            tournament_info[req_col] = value
+                            break
+        
+        # Map columns to required columns
+        for col in group_df.columns:
+            norm_col = normalize_col(str(col))
+            if norm_col in col_mapping and tournament_info[col_mapping[norm_col]] is None:
+                # Find the first non-NaN value in this column
+                non_nan_values = group_df[col].dropna()
+                if not non_nan_values.empty:
+                    tournament_info[col_mapping[norm_col]] = non_nan_values.iloc[0]
+            
+            # Direct match with required columns
+            for req_col in REQUIRED_COLUMNS:
+                if req_col.lower() == norm_col and tournament_info[req_col] is None:
+                    non_nan_values = group_df[col].dropna()
+                    if not non_nan_values.empty:
+                        tournament_info[req_col] = non_nan_values.iloc[0]
+        
+        # Look for key-value pairs in the data
+        for idx, row in group_df.iterrows():
+            for col in group_df.columns:
+                cell_value = row[col]
+                if pd.notna(cell_value):
+                    cell_str = str(cell_value).strip()
+                    
+                    # Check for "Key: Value" or "Key | Value" format
+                    patterns = [r'^(.*?):\s*(.*)$', r'^(.*?)\|\s*(.*)$']
+                    for pattern in patterns:
+                        match = re.match(pattern, cell_str)
+                        if match:
+                            key, value = match.groups()
+                            key = key.strip()
+                            value = value.strip()
+                            
+                            # Map to required column if possible
+                            for req_col in REQUIRED_COLUMNS:
+                                if req_col.lower() in key.lower():
+                                    tournament_info[req_col] = value
+                                    break
+        
+        # Try to extract location data
+        location_cols = ['Location', 'Address', 'Venue']
+        for col in location_cols:
+            if col in group_df.columns:
+                # Extract city, state, zip from location column
+                tmp_df = pd.DataFrame([tournament_info])
+                tmp_df[col] = group_df[col].dropna().iloc[0] if not group_df[col].dropna().empty else None
+                tmp_df = extract_location_from_col(tmp_df, col)
+                
+                # Update tournament info with extracted data
+                for field in ['City', 'State', 'Zip']:
+                    if tournament_info[field] is None and field in tmp_df.columns:
+                        tournament_info[field] = tmp_df[field].iloc[0]
+    
+    # Standardize values
+    if tournament_info['Date'] is not None:
+        tournament_info['Date'] = standardize_date(tournament_info['Date'])
+    if tournament_info['State'] is not None:
+        tournament_info['State'] = standardize_state(tournament_info['State'])
+    if tournament_info['Zip'] is not None:
+        tournament_info['Zip'] = standardize_zip(tournament_info['Zip'])
+    
+    return tournament_info
+
+def process_excel_file(file):
+    """Process an Excel file and extract tournament information."""
+    try:
+        # Read all sheets
+        xls = pd.ExcelFile(file)
+        sheet_names = xls.sheet_names
+        
+        all_tournaments = []
+        
+        for sheet_name in sheet_names:
+            # Read the sheet
+            df = pd.read_excel(file, sheet_name=sheet_name, header=None)
+            
+            # Try to detect if there's a header row
+            potential_header_row = df.iloc[0]
+            if potential_header_row.astype(str).str.contains('|').any() or potential_header_row.astype(str).str.contains(':').any():
+                # This might be a header row with column names
+                df = pd.read_excel(file, sheet_name=sheet_name)
+            else:
+                # Try to detect header based on data types
+                # Assuming headers are typically strings while data can be mixed
+                header_candidates = []
+                for i in range(min(5, len(df))):
+                    row = df.iloc[i]
+                    if row.apply(lambda x: isinstance(x, str)).mean() > 0.7:  # If >70% of columns are strings
+                        header_candidates.append(i)
+                
+                if header_candidates:
+                    # Use the last candidate as header (often headers span multiple rows)
+                    header_row = max(header_candidates)
+                    df = pd.read_excel(file, sheet_name=sheet_name, header=header_row)
+                else:
+                    # No clear header, keep as is
+                    pass
+            
+            # Detect tournament groups
+            groups = detect_tournament_groups(df)
+            
+            # Process each group
+            for group_df in groups:
+                tournament_info = extract_tournament_info(group_df)
+                all_tournaments.append(tournament_info)
+        
+        # Convert to DataFrame
+        tournaments_df = pd.DataFrame(all_tournaments)
+        
+        # Filter out rows where all required columns are None/NaN
+        tournaments_df = tournaments_df.dropna(subset=REQUIRED_COLUMNS, how='all')
+        
+        return tournaments_df
+    
+    except Exception as e:
+        st.error(f"Error processing Excel file: {str(e)}")
+        return pd.DataFrame(columns=REQUIRED_COLUMNS)
 
 def clean_golf_data(df):
     """Clean and standardize golf tournament data."""
@@ -160,8 +357,10 @@ def clean_golf_data(df):
         if col not in cleaned_df.columns:
             cleaned_df[col] = None
     
-    # Try to extract location data
-    cleaned_df = extract_location_data(cleaned_df)
+    # Try to extract location data from combined fields
+    for col in cleaned_df.columns:
+        if any(loc_key in col.lower() for loc_key in ['location', 'address', 'venue']):
+            cleaned_df = extract_location_from_col(cleaned_df, col)
     
     # Standardize date format
     if 'Date' in cleaned_df.columns:
@@ -184,93 +383,263 @@ def clean_golf_data(df):
     
     return cleaned_df
 
+# Manual entry for filling missing data
+def manual_entry_form(df):
+    """Form for manually entering missing data."""
+    st.subheader("Fill Missing Data")
+    
+    # Check which required columns have missing data
+    missing_data = {col: df[col].isna().sum() for col in REQUIRED_COLUMNS}
+    missing_cols = [col for col, count in missing_data.items() if count > 0]
+    
+    if not missing_cols:
+        st.success("All required data is present!")
+        return df
+    
+    st.write("Some required data is missing. Please fill in the missing information:")
+    
+    # Create tabs for editing each row with missing data
+    rows_with_missing = df[df[missing_cols].isna().any(axis=1)]
+    
+    if not rows_with_missing.empty:
+        tabs = st.tabs([f"Tournament {i+1}" for i in range(len(rows_with_missing))])
+        
+        for i, (tab, (idx, row)) in enumerate(zip(tabs, rows_with_missing.iterrows())):
+            with tab:
+                st.write(f"Tournament: {row['Name'] if pd.notna(row['Name']) else 'Unknown'}")
+                
+                # Create form fields for missing data
+                updated_values = {}
+                for col in missing_cols:
+                    # Show current value (if any)
+                    current_val = row[col] if pd.notna(row[col]) else ""
+                    
+                    # Create appropriate input field based on column type
+                    if col == 'Date':
+                        if current_val:
+                            try:
+                                date_val = pd.to_datetime(current_val)
+                                new_val = st.date_input(f"{col}", date_val)
+                            except:
+                                new_val = st.date_input(f"{col}")
+                        else:
+                            new_val = st.date_input(f"{col}")
+                        updated_values[col] = new_val.strftime('%Y-%m-%d') if new_val else None
+                    elif col == 'State':
+                        states = ["", "AL", "AK", "AZ", "AR", "CA", "CO", "CT", "DE", "FL", "GA", 
+                                 "HI", "ID", "IL", "IN", "IA", "KS", "KY", "LA", "ME", "MD", 
+                                 "MA", "MI", "MN", "MS", "MO", "MT", "NE", "NV", "NH", "NJ", 
+                                 "NM", "NY", "NC", "ND", "OH", "OK", "OR", "PA", "RI", "SC", 
+                                 "SD", "TN", "TX", "UT", "VT", "VA", "WA", "WV", "WI", "WY", "DC"]
+                        new_val = st.selectbox(f"{col}", states, index=0 if not current_val else states.index(current_val))
+                        updated_values[col] = new_val if new_val else None
+                    elif col == 'Category':
+                        # Try to suggest categories based on existing data
+                        existing_categories = df['Category'].dropna().unique().tolist()
+                        categories = [""] + existing_categories
+                        new_val = st.selectbox(f"{col}", categories, index=0 if not current_val else 
+                                             categories.index(current_val) if current_val in categories else 0)
+                        updated_values[col] = new_val if new_val else None
+                    else:
+                        new_val = st.text_input(f"{col}", current_val)
+                        updated_values[col] = new_val if new_val else None
+                
+                # Update button
+                if st.button(f"Update Tournament {i+1}"):
+                    for col, val in updated_values.items():
+                        df.at[idx, col] = val
+                    st.success(f"Tournament {i+1} updated!")
+    
+    return df
+
 # File uploader
-uploaded_file = st.file_uploader("Choose a CSV file", type="csv")
+st.subheader("Upload your file")
+file_format = st.radio("Select file format:", ["Excel (.xlsx)", "CSV (.csv)"])
+
+uploaded_file = None
+if file_format == "Excel (.xlsx)":
+    uploaded_file = st.file_uploader("Choose an Excel file", type=["xlsx", "xls"])
+else:
+    uploaded_file = st.file_uploader("Choose a CSV file", type=["csv"])
 
 if uploaded_file is not None:
-    # Read the CSV file
     try:
-        df = pd.read_csv(uploaded_file)
+        # Process the file based on format
+        if file_format == "Excel (.xlsx)":
+            # For Excel files, use the specialized processing
+            df = process_excel_file(uploaded_file)
+            
+            if not df.empty:
+                # Display extracted tournaments
+                st.subheader("Extracted Tournament Data")
+                st.dataframe(df)
+                
+                # Clean the data
+                cleaned_df = clean_golf_data(df)
+                
+                # Display cleaned data
+                st.subheader("Cleaned Tournament Data")
+                st.dataframe(cleaned_df)
+                
+                # Allow manual entry for missing data
+                final_df = manual_entry_form(cleaned_df)
+                
+                # Create a download button for the cleaned data
+                csv = final_df.to_csv(index=False)
+                st.download_button(
+                    label="Download Cleaned Data (CSV)",
+                    data=csv,
+                    file_name="cleaned_golf_tournaments.csv",
+                    mime="text/csv"
+                )
+                
+                # Also provide Excel download
+                buffer = io.BytesIO()
+                with pd.ExcelWriter(buffer, engine='xlsxwriter') as writer:
+                    final_df.to_excel(writer, sheet_name='Tournaments', index=False)
+                    # Auto-adjust columns' width
+                    worksheet = writer.sheets['Tournaments']
+                    for i, col in enumerate(final_df.columns):
+                        max_len = max(final_df[col].astype(str).apply(len).max(), len(col)) + 2
+                        worksheet.set_column(i, i, max_len)
+                
+                buffer.seek(0)
+                
+                st.download_button(
+                    label="Download Cleaned Data (Excel)",
+                    data=buffer,
+                    file_name="cleaned_golf_tournaments.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                )
+                
+                # Display analysis of the data
+                if not final_df.empty:
+                    st.subheader("Data Analysis")
+                    
+                    col1, col2 = st.columns(2)
+                    
+                    # Count tournaments by category
+                    if final_df['Category'].notna().any():
+                        with col1:
+                            st.write("Tournament Count by Category")
+                            category_counts = final_df['Category'].value_counts()
+                            st.bar_chart(category_counts)
+                    
+                    # Count tournaments by state
+                    if final_df['State'].notna().any():
+                        with col2:
+                            st.write("Tournament Count by State")
+                            state_counts = final_df['State'].value_counts()
+                            st.bar_chart(state_counts)
+                    
+                    # Count tournaments by month (if dates are available)
+                    if final_df['Date'].notna().any():
+                        try:
+                            final_df['Month'] = pd.to_datetime(final_df['Date']).dt.strftime('%B')
+                            st.write("Tournament Count by Month")
+                            month_counts = final_df['Month'].value_counts()
+                            st.bar_chart(month_counts)
+                        except:
+                            st.write("Could not analyze tournament count by month due to date format issues.")
+            else:
+                st.warning("No tournament data found in the Excel file.")
         
-        # Display original data
-        st.subheader("Original Data")
-        st.dataframe(df)
-        
-        # Clean the data
-        cleaned_df = clean_golf_data(df)
-        
-        # Display cleaned data
-        st.subheader("Cleaned Data")
-        st.dataframe(cleaned_df)
-        
-        # Show which columns were missing and added
-        missing_cols = [col for col in REQUIRED_COLUMNS if col not in df.columns]
-        if missing_cols:
-            st.warning(f"Added missing columns: {', '.join(missing_cols)}")
-        
-        # Create a download button for the cleaned data
-        csv = cleaned_df.to_csv(index=False)
-        st.download_button(
-            label="Download Cleaned Data",
-            data=csv,
-            file_name="cleaned_golf_tournaments.csv",
-            mime="text/csv"
-        )
-        
-        # Display analysis of the data
-        st.subheader("Data Analysis")
-        
-        # Count tournaments by category
-        if cleaned_df['Category'].notna().any():
-            st.write("Tournament Count by Category")
-            category_counts = cleaned_df['Category'].value_counts()
-            st.bar_chart(category_counts)
-        
-        # Count tournaments by state
-        if cleaned_df['State'].notna().any():
-            st.write("Tournament Count by State")
-            state_counts = cleaned_df['State'].value_counts()
-            st.bar_chart(state_counts)
-        
-        # Count tournaments by month (if dates are available)
-        if cleaned_df['Date'].notna().any():
-            try:
-                cleaned_df['Month'] = pd.to_datetime(cleaned_df['Date']).dt.strftime('%B')
-                st.write("Tournament Count by Month")
-                month_counts = cleaned_df['Month'].value_counts()
-                st.bar_chart(month_counts)
-            except:
-                st.write("Could not analyze tournament count by month due to date format issues.")
-        
+        else:  # CSV format
+            # Read the CSV file
+            df = pd.read_csv(uploaded_file)
+            
+            # Display original data
+            st.subheader("Original Data")
+            st.dataframe(df)
+            
+            # Clean the data
+            cleaned_df = clean_golf_data(df)
+            
+            # Display cleaned data
+            st.subheader("Cleaned Data")
+            st.dataframe(cleaned_df)
+            
+            # Show which columns were missing and added
+            missing_cols = [col for col in REQUIRED_COLUMNS if col not in df.columns]
+            if missing_cols:
+                st.warning(f"Added missing columns: {', '.join(missing_cols)}")
+            
+            # Allow manual entry for missing data
+            final_df = manual_entry_form(cleaned_df)
+            
+            # Create a download button for the cleaned data
+            csv = final_df.to_csv(index=False)
+            st.download_button(
+                label="Download Cleaned Data",
+                data=csv,
+                file_name="cleaned_golf_tournaments.csv",
+                mime="text/csv"
+            )
+            
+            # Display analysis of the data
+            st.subheader("Data Analysis")
+            
+            # Count tournaments by category
+            if final_df['Category'].notna().any():
+                st.write("Tournament Count by Category")
+                category_counts = final_df['Category'].value_counts()
+                st.bar_chart(category_counts)
+            
+            # Count tournaments by state
+            if final_df['State'].notna().any():
+                st.write("Tournament Count by State")
+                state_counts = final_df['State'].value_counts()
+                st.bar_chart(state_counts)
+            
+            # Count tournaments by month (if dates are available)
+            if final_df['Date'].notna().any():
+                try:
+                    final_df['Month'] = pd.to_datetime(final_df['Date']).dt.strftime('%B')
+                    st.write("Tournament Count by Month")
+                    month_counts = final_df['Month'].value_counts()
+                    st.bar_chart(month_counts)
+                except:
+                    st.write("Could not analyze tournament count by month due to date format issues.")
+    
     except Exception as e:
         st.error(f"Error: {e}")
-        st.write("Please ensure your CSV file is properly formatted.")
+        st.write("Please ensure your file is properly formatted.")
 
 # Sidebar with instructions
 with st.sidebar:
     st.header("Instructions")
     st.write("""
-    1. Upload a CSV file containing golf tournament data.
-    2. The app will automatically clean and standardize the data.
-    3. Required columns will be identified or created:
-       - Date
-       - Name
-       - Course
-       - Category
-       - City
-       - State
-       - Zip
-    4. Download the cleaned data as a CSV file.
+    1. Select your file format (Excel or CSV)
+    2. Upload your golf tournament data file
+    3. The app will:
+       - Extract tournament information
+       - Clean and standardize the data
+       - Allow you to fill in any missing information
+       - Provide data visualizations
+    4. Download the cleaned data in your preferred format
+    """)
+    
+    st.header("Required Columns")
+    st.write("""
+    The app will ensure these required columns are present:
+    - Date (tournament date)
+    - Name (tournament name)
+    - Course (golf course name)
+    - Category (tournament type/category)
+    - City (location city)
+    - State (location state, 2-letter code)
+    - Zip (5-digit zip code)
     """)
     
     st.header("Data Processing")
     st.write("""
     This app performs the following:
     
-    - Standardizes date formats to YYYY-MM-DD
-    - Converts state names to two-letter abbreviations
-    - Standardizes ZIP codes to 5-digit format
-    - Extracts location data from address fields
-    - Maps similar column names to required columns
-    - Reorders columns with required columns first
+    - For Excel files, intelligent extraction of tournament data
+    - Detection of tournament groups within the data
+    - Standardization of date formats to YYYY-MM-DD
+    - Conversion of state names to two-letter abbreviations
+    - Standardization of ZIP codes to 5-digit format
+    - Extraction of location data from address fields
+    - Interactive form for filling in missing data
     """)
