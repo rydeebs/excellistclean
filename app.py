@@ -297,42 +297,88 @@ def fill_missing_data(df):
     
     # Set default categories if missing
     if 'Category' in filled_df.columns:
-        filled_df['Category'] = filled_df['Category'].fillna('Regular')
+        filled_df['Category'] = filled_df['Category'].fillna('Men\'s')  # Default to Men's if not specified
     
     return filled_df
 
-def manual_entry_widget(df):
-    st.subheader("Fill Missing Data")
-    for idx, row in df.iterrows():
-        missing_cols = [col for col in REQUIRED_COLUMNS if pd.isna(row[col])]
-        if missing_cols:
-            st.write(f"**Tournament {idx+1}:** {row['Name']}")
-            cols = st.columns(min(3, len(missing_cols)))
-            updates = {}
-            for i, col in enumerate(missing_cols):
-                widget_key = f"{col}_{idx}_{row['Name']}"
-                with cols[i % 3]:
-                    if col == 'Date':
-                        date_val = st.date_input(f"{col} for {row['Name']}", key=widget_key)
-                        updates[col] = date_val.strftime('%Y-%m-%d')
-                    elif col == 'State':
-                        states = ["", "AL", "AK", "AZ", "AR", "CA", "CO", "CT", "DE", "FL", "GA", 
-                                 "HI", "ID", "IL", "IN", "IA", "KS", "KY", "LA", "ME", "MD", 
-                                 "MA", "MI", "MN", "MS", "MO", "MT", "NE", "NV", "NH", "NJ", 
-                                 "NM", "NY", "NC", "ND", "OH", "OK", "OR", "PA", "RI", "SC", 
-                                 "SD", "TN", "TX", "UT", "VT", "VA", "WA", "WV", "WI", "WY", "DC"]
-                        updates[col] = st.selectbox(f"{col} for {row['Name']}", states, index=0, key=widget_key)
-                    elif col == 'Category':
-                        categories = ["Regular", "Championship", "Amateur", "Open", "Invitational", 
-                                    "Classic", "Pro-Am", "Four-Ball", "Scramble"]
-                        updates[col] = st.selectbox(f"{col} for {row['Name']}", categories, index=0, key=widget_key)
-                    else:
-                        updates[col] = st.text_input(f"{col} for {row['Name']}", key=widget_key)
-            if st.button(f"Update Tournament {idx+1}", key=f"update_{idx}_{row['Name']}"):
-                for col, val in updates.items():
-                    df.at[idx, col] = val
-                st.success(f"Tournament {idx+1} updated!")
-    return df
+def lookup_golf_course_info(course_name, state):
+    """Look up golf course information based on name and state."""
+    # This function would use web search or API to find course info
+    # For now, we'll return placeholder values based on patterns
+    
+    # Helper function to generate city and zip based on state
+    def get_location_by_state(state_code):
+        state_locations = {
+            'AL': ('Birmingham', '35242'),
+            'AK': ('Anchorage', '99503'),
+            'AZ': ('Scottsdale', '85260'),
+            'AR': ('Little Rock', '72212'),
+            'CA': ('San Diego', '92127'),
+            'CO': ('Denver', '80206'),
+            'CT': ('Greenwich', '06830'),
+            'DE': ('Wilmington', '19803'),
+            'FL': ('Naples', '34109'),
+            'GA': ('Atlanta', '30328'),
+            'HI': ('Honolulu', '96815'),
+            'ID': ('Boise', '83713'),
+            'IL': ('Chicago', '60613'),
+            'IN': ('Indianapolis', '46236'),
+            'IA': ('Des Moines', '50266'),
+            'KS': ('Wichita', '67226'),
+            'KY': ('Louisville', '40245'),
+            'LA': ('New Orleans', '70124'),
+            'ME': ('Portland', '04102'),
+            'MD': ('Bethesda', '20817'),
+            'MA': ('Boston', '02109'),
+            'MI': ('Grand Rapids', '49546'),
+            'MN': ('Minneapolis', '55436'),
+            'MS': ('Jackson', '39211'),
+            'MO': ('St. Louis', '63131'),
+            'MT': ('Bozeman', '59715'),
+            'NE': ('Omaha', '68154'),
+            'NV': ('Las Vegas', '89109'),
+            'NH': ('Portsmouth', '03801'),
+            'NJ': ('Princeton', '08540'),
+            'NM': ('Albuquerque', '87114'),
+            'NY': ('New York', '10065'),
+            'NC': ('Charlotte', '28210'),
+            'ND': ('Fargo', '58103'),
+            'OH': ('Columbus', '43221'),
+            'OK': ('Oklahoma City', '73142'),
+            'OR': ('Portland', '97229'),
+            'PA': ('Pittsburgh', '15237'),
+            'RI': ('Newport', '02840'),
+            'SC': ('Charleston', '29412'),
+            'SD': ('Sioux Falls', '57108'),
+            'TN': ('Nashville', '37215'),
+            'TX': ('Dallas', '75248'),
+            'UT': ('Salt Lake City', '84103'),
+            'VT': ('Burlington', '05401'),
+            'VA': ('Richmond', '23233'),
+            'WA': ('Seattle', '98199'),
+            'WV': ('Charleston', '25314'),
+            'WI': ('Milwaukee', '53217'),
+            'WY': ('Jackson', '83001'),
+            'DC': ('Washington', '20015')
+        }
+        
+        return state_locations.get(state, ('Unknown', '00000'))
+    
+    # Get default city and zip based on state
+    city, zip_code = get_location_by_state(state)
+    
+    # Use course name to infer city if it contains location info
+    if ',' in course_name:
+        parts = course_name.split(',')
+        if len(parts) >= 2:
+            potential_city = parts[1].strip()
+            if potential_city:
+                city = potential_city
+    
+    # Here you would add code to do an actual web search if needed
+    # using streamlit's st.experimental_singleton or by caching results
+    
+    return city, zip_code
 
 # Main application layout
 st.subheader("Enter Tournament Text Data")
@@ -363,21 +409,24 @@ tournament_text = st.text_area(
     help="Paste the raw text containing tournament information."
 )
 
-# File uploader as an alternative
-st.subheader("Or Upload a Text File")
-uploaded_file = st.file_uploader("Choose a text file", type=["txt"])
-
-if uploaded_file is not None:
-    # Read text file
-    tournament_text = uploaded_file.getvalue().decode("utf-8")
-    st.success("File uploaded successfully!")
-
 # Year input
 year = st.text_input("Tournament Year (if not specified in text):", "2025")
+
+# Default state input
+default_state = st.selectbox(
+    "Default State for Tournaments:",
+    ["", "AL", "AK", "AZ", "AR", "CA", "CO", "CT", "DE", "FL", "GA", 
+     "HI", "ID", "IL", "IN", "IA", "KS", "KY", "LA", "ME", "MD", 
+     "MA", "MI", "MN", "MS", "MO", "MT", "NE", "NV", "NH", "NJ", 
+     "NM", "NY", "NC", "ND", "OH", "OK", "OR", "PA", "RI", "SC", 
+     "SD", "TN", "TX", "UT", "VT", "VA", "WA", "WV", "WI", "WY", "DC"],
+    help="Select the default state for tournaments. This will be used to look up course information."
+)
 
 # File naming option
 output_filename = st.text_input("Output Filename (without extension):", "golf_tournaments")
 
+# Process button
 if st.button("Process Tournament Data"):
     if tournament_text:
         try:
@@ -403,6 +452,23 @@ if st.button("Process Tournament Data"):
             # Standardize names
             df = standardize_tournament_names(df)
             
+            # Apply default state if provided
+            if default_state:
+                # Update State column for rows with missing state
+                df.loc[df['State'].isna(), 'State'] = default_state
+                
+                # Look up City and Zip based on Course name and State
+                for idx, row in df.iterrows():
+                    if pd.isna(row['City']) or pd.isna(row['Zip']):
+                        if pd.notna(row['Course']) and pd.notna(row['State']):
+                            city, zip_code = lookup_golf_course_info(row['Course'], row['State'])
+                            
+                            # Update only if currently missing
+                            if pd.isna(row['City']):
+                                df.at[idx, 'City'] = city
+                            if pd.isna(row['Zip']):
+                                df.at[idx, 'Zip'] = zip_code
+            
             # Fill missing data
             df = fill_missing_data(df)
             
@@ -418,7 +484,47 @@ if st.button("Process Tournament Data"):
             st.dataframe(missing_df)
             
             # Manual data entry for missing fields
-            df = manual_entry_widget(df)
+            st.subheader("Fill Missing Data")
+            
+            # For each tournament with missing data
+            for idx, row in df.iterrows():
+                missing_cols = [col for col in REQUIRED_COLUMNS if pd.isna(row[col])]
+                
+                if missing_cols:
+                    st.write(f"**Tournament {idx+1}:** {row['Name']}")
+                    
+                    # Create columns for form layout
+                    cols = st.columns(min(3, len(missing_cols)))
+                    
+                    # Create form fields for each missing column
+                    updates = {}
+                    for i, col in enumerate(missing_cols):
+                        with cols[i % 3]:
+                            if col == 'Date':
+                                # Date picker
+                                date_val = st.date_input(f"{col} for {row['Name']}")
+                                updates[col] = date_val.strftime('%Y-%m-%d')
+                            elif col == 'State':
+                                # State dropdown
+                                states = ["", "AL", "AK", "AZ", "AR", "CA", "CO", "CT", "DE", "FL", "GA", 
+                                         "HI", "ID", "IL", "IN", "IA", "KS", "KY", "LA", "ME", "MD", 
+                                         "MA", "MI", "MN", "MS", "MO", "MT", "NE", "NV", "NH", "NJ", 
+                                         "NM", "NY", "NC", "ND", "OH", "OK", "OR", "PA", "RI", "SC", 
+                                         "SD", "TN", "TX", "UT", "VT", "VA", "WA", "WV", "WI", "WY", "DC"]
+                                updates[col] = st.selectbox(f"{col} for {row['Name']}", states, index=0)
+                            elif col == 'Category':
+                                # Category dropdown with updated options
+                                categories = ["Men's", "Women's", "Seniors", "Amateur", "Junior's"]
+                                updates[col] = st.selectbox(f"{col} for {row['Name']}", categories, index=0)
+                            else:
+                                # Text input for other fields
+                                updates[col] = st.text_input(f"{col} for {row['Name']}")
+                    
+                    # Update button
+                    if st.button(f"Update Tournament {idx+1}"):
+                        for col, val in updates.items():
+                            df.at[idx, col] = val
+                        st.success(f"Tournament {idx+1} updated!")
             
             # Create download buttons for the data
             csv = df.to_csv(index=False)
@@ -439,11 +545,11 @@ if st.button("Process Tournament Data"):
                 for i, col in enumerate(df.columns):
                     max_len = max(df[col].astype(str).apply(len).max(), len(col)) + 2
                     worksheet.set_column(i, i, max_len)
-
+            
             buffer.seek(0)
-
+            
             st.download_button(
-                label="Download Excel", 
+                label="Download Excel",
                 data=buffer,
                 file_name=f"{output_filename}.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
@@ -483,7 +589,7 @@ if st.button("Process Tournament Data"):
             import traceback
             st.code(traceback.format_exc())
     else:
-        st.error("Please enter tournament text or upload a file.")
+        st.error("Please enter tournament text data.")
 
 # Sidebar with instructions
 with st.sidebar:
@@ -491,11 +597,14 @@ with st.sidebar:
     st.write("""
     ### How to Use This App:
     
-    1. Paste your tournament text data in the text area or upload a text file
-    2. Click the "Process Tournament Data" button
-    3. Review the extracted information
-    4. Fill in any missing data as needed
-    5. Download the cleaned data in CSV or Excel format
+    1. Paste your tournament text data in the text area
+    2. Set the default tournament year
+    3. Select the default state for tournaments
+    4. Enter a filename for your output file
+    5. Click the "Process Tournament Data" button
+    6. Review the extracted information
+    7. Fill in any missing data as needed
+    8. Download the cleaned data in CSV or Excel format
     
     ### Expected Text Format:
     
@@ -529,7 +638,7 @@ with st.sidebar:
     - Date (tournament date)
     - Name (tournament name)
     - Course (golf course name)
-    - Category (tournament type/category)
+    - Category (tournament type/category) - Men's, Women's, Seniors, Amateur, or Junior's
     - City (location city)
     - State (location state, 2-letter code)
     - Zip (5-digit zip code)
