@@ -297,44 +297,295 @@ def process_excel_file(file):
         xls = pd.ExcelFile(file)
         sheet_names = xls.sheet_names
         
+        # Debug info
+        st.write(f"Found {len(sheet_names)} sheets: {', '.join(sheet_names)}")
+        
         all_tournaments = []
         
         for sheet_name in sheet_names:
-            # Read the sheet
-            df = pd.read_excel(file, sheet_name=sheet_name, header=None)
+            st.write(f"Processing sheet: {sheet_name}")
             
-            # Try to detect if there's a header row
-            potential_header_row = df.iloc[0]
-            if potential_header_row.astype(str).str.contains('|').any() or potential_header_row.astype(str).str.contains(':').any():
-                # This might be a header row with column names
+            # Try different header options
+            # First try with header=0 (standard)
+            try:
                 df = pd.read_excel(file, sheet_name=sheet_name)
-            else:
-                # Try to detect header based on data types
-                # Assuming headers are typically strings while data can be mixed
-                header_candidates = []
-                for i in range(min(5, len(df))):
-                    row = df.iloc[i]
-                    if row.apply(lambda x: isinstance(x, str)).mean() > 0.7:  # If >70% of columns are strings
-                        header_candidates.append(i)
+                st.write(f"Columns found with header=0: {list(df.columns)}")
                 
-                if header_candidates:
-                    # Use the last candidate as header (often headers span multiple rows)
-                    header_row = max(header_candidates)
-                    df = pd.read_excel(file, sheet_name=sheet_name, header=header_row)
-                else:
-                    # No clear header, keep as is
-                    pass
+                # Display first few rows for debugging
+                st.write("First 3 rows of data:")
+                st.dataframe(df.head(3))
+                
+                # Check if this looks like header correctly detected
+                if len(df.columns) <= 2 or all(col == col.lower() for col in df.columns):
+                    # Try again with no header
+                    st.write("Trying with no predefined header...")
+                    df = pd.read_excel(file, sheet_name=sheet_name, header=None)
+                    
+                    # Try to find a header row by looking at first few rows
+                    potential_headers = []
+                    for i in range(min(5, len(df))):
+                        row = df.iloc[i]
+                        # If row has text values that could be column headers
+                        text_values = row.astype(str).str.lower()
+                        if any(col in ' '.join(text_values) for col in ['date', 'name', 'course', 'tournament', 'location']):
+                            potential_headers.append(i)
+                    
+                    if potential_headers:
+                        header_row = min(potential_headers)  # Use the earliest potential header
+                        st.write(f"Found potential header at row {header_row}")
+                        df = pd.read_excel(file, sheet_name=sheet_name, header=header_row)
+                        st.write(f"New columns: {list(df.columns)}")
+                        st.dataframe(df.head(3))
+            except Exception as e:
+                st.warning(f"Error with standard header detection: {e}")
+                # Fallback to no header
+                df = pd.read_excel(file, sheet_name=sheet_name, header=None)
             
-            # Detect tournament groups
-            groups = detect_tournament_groups(df)
+            # Look for tournament data directly in rows
+            tournament_rows = []
+            for idx, row in df.iterrows():
+                # Skip completely empty rows
+                if row.isna().all():
+                    continue
+                
+                # Convert row to dictionary
+                row_dict = row.to_dict()
+                
+                # Check if this row looks like tournament data
+                # Criteria: More than 2 non-NaN values, or contains tournament name
+                non_na_count = row.notna().sum()
+                has_tournament_name = False
+                
+                for col, val in row_dict.items():
+                    if pd.notna(val):
+                        val_str = str(val).lower()
+                        if any(keyword in val_str for keyword in ['tournament', 'championship', 'open', 'classic', 'invitational']):
+                            has_tournament_name = True
+                            break
+                
+                if non_na_count > 2 or has_tournament_name:
+                    # This might be a tournament row
+                    tournament_info = {col: None for col in REQUIRED_COLUMNS}
+                    
+                    # Try to map row values to required columns
+                    for col, val in row_dict.items():
+                        if pd.isna(val):
+                            continue
+                        
+                        col_str = str(col).lower()
+                        val_str = str(val)
+                        
+                        # Direct mapping based on column name
+                        if 'date' in col_str:
+                            tournament_info['Date'] = standardize_date(val)
+                        elif any(name in col_str for name in ['tournament', 'name', 'event']):
+                            tournament_info['Name'] = val_str
+                        elif any(name in col_str for name in ['course', 'club']):
+                            tournament_info['Course'] = val_str
+                        elif any(name in col_str for name in ['category', 'type']):
+                            tournament_info['Category'] = val_str
+                        elif 'city' in col_str:
+                            tournament_info['City'] = val_str
+                        elif any(name in col_str for name in ['state', 'province']):
+                            tournament_info['State'] = standardize_state(val_str)
+                        elif any(name in col_str for name in ['zip', 'postal']):
+                            tournament_info['Zip'] = standardize_zip(val_str)
+                        
+                        # Look for patterns in the value itself
+                        if tournament_info['Name'] is None:
+                            if any(keyword in val_str.lower() for keyword in ['tournament', 'championship', 'open', 'classic', 'invitational']):
+                                tournament_info['Name'] = val_str
+                        
+                        # Date detection (if it looks like a date)
+                        if tournament_info['Date'] is None and re.search(r'\d{1,2}[\/\-\.]\d{1,2}[\/\-\.]\d{2,4}', val_str):
+                            tournament_info['Date'] = standardize_date(val_str)
+                        
+                        # Try to extract location info from values that might contain city/state
+                        if tournament_info['City'] is None or tournament_info['State'] is None:
+                            # Look for "City, ST" pattern
+                            location_match = re.search(r'([^,]+),\s*([A-Za-z]{2})', val_str)
+                            if location_match:
+                                city, state = location_match.groups()
+                                if tournament_info['City'] is None:
+                                    tournament_info['City'] = city.strip()
+                                if tournament_info['State'] is None:
+                                    tournament_info['State'] = standardize_state(state.strip())
+                    
+                    # If we found a name, it's probably a tournament
+                    if tournament_info['Name'] is not None:
+                        tournament_rows.append(tournament_info)
             
-            # Process each group
-            for group_df in groups:
-                tournament_info = extract_tournament_info(group_df)
+            # We might need to merge adjacent rows if they contain complementary information
+            merged_tournaments = []
+            if tournament_rows:
+                current_tournament = tournament_rows[0]
+                
+                for i in range(1, len(tournament_rows)):
+                    next_tournament = tournament_rows[i]
+                    
+                    # Decide whether to merge or add as new tournament
+                    # If the next row has a name and the current tournament already has a name,
+                    # it's likely a new tournament
+                    if next_tournament['Name'] is not None and current_tournament['Name'] is not None:
+                        merged_tournaments.append(current_tournament)
+                        current_tournament = next_tournament
+                    else:
+                        # Merge complementary information
+                        for col in REQUIRED_COLUMNS:
+                            if current_tournament[col] is None and next_tournament[col] is not None:
+                                current_tournament[col] = next_tournament[col]
+                
+                # Don't forget to add the last tournament
+                merged_tournaments.append(current_tournament)
+            
+            all_tournaments.extend(merged_tournaments)
+        
+        # If we didn't find any tournaments with the row-by-row approach,
+        # try to interpret the entire table as tournament list
+        if not all_tournaments:
+            st.write("No tournaments found with row analysis. Trying whole table approach...")
+            
+            # Try to interpret the first sheet as a table of tournaments
+            df = pd.read_excel(file, sheet_name=sheet_names[0])
+            
+            # Clean up column names
+            df.columns = [str(col).strip() for col in df.columns]
+            
+            # Display the dataframe for debugging
+            st.write("Table interpretation:")
+            st.dataframe(df.head())
+            
+            # Map columns to required fields
+            column_mapping = {}
+            for col in df.columns:
+                col_lower = str(col).lower()
+                if 'date' in col_lower:
+                    column_mapping[col] = 'Date'
+                elif any(name in col_lower for name in ['tournament', 'name', 'event']):
+                    column_mapping[col] = 'Name'
+                elif any(name in col_lower for name in ['course', 'club']):
+                    column_mapping[col] = 'Course'
+                elif any(name in col_lower for name in ['category', 'type']):
+                    column_mapping[col] = 'Category'
+                elif 'city' in col_lower or 'location' in col_lower:
+                    column_mapping[col] = 'City'
+                elif any(name in col_lower for name in ['state', 'province']):
+                    column_mapping[col] = 'State'
+                elif any(name in col_lower for name in ['zip', 'postal']):
+                    column_mapping[col] = 'Zip'
+            
+            # If we found some mappings, create tournaments from the table
+            if column_mapping:
+                st.write(f"Found column mappings: {column_mapping}")
+                
+                for idx, row in df.iterrows():
+                    # Skip if row is all NaN
+                    if row.isna().all():
+                        continue
+                    
+                    tournament_info = {col: None for col in REQUIRED_COLUMNS}
+                    
+                    # Map values from the row using our column mapping
+                    for col, req_col in column_mapping.items():
+                        if pd.notna(row[col]):
+                            val = row[col]
+                            if req_col == 'Date':
+                                tournament_info[req_col] = standardize_date(val)
+                            elif req_col == 'State':
+                                tournament_info[req_col] = standardize_state(str(val))
+                            elif req_col == 'Zip':
+                                tournament_info[req_col] = standardize_zip(str(val))
+                            else:
+                                tournament_info[req_col] = str(val)
+                    
+                    # Add tournament if it has at least a name
+                    if tournament_info['Name'] is not None:
+                        all_tournaments.append(tournament_info)
+            
+            # If still no tournaments, try with no header
+            if not all_tournaments:
+                st.write("Trying table interpretation with no header...")
+                df = pd.read_excel(file, sheet_name=sheet_names[0], header=None)
+                
+                # Try to interpret each row as a potential tournament
+                for idx, row in df.iterrows():
+                    # Skip if row is all NaN
+                    if row.isna().all():
+                        continue
+                    
+                    # Convert row to list of values
+                    values = row.tolist()
+                    values = [str(val) if pd.notna(val) else None for val in values]
+                    
+                    # If we have at least 3 non-None values, treat as potential tournament
+                    if sum(1 for val in values if val is not None) >= 3:
+                        tournament_info = {col: None for col in REQUIRED_COLUMNS}
+                        
+                        # Try to identify values based on patterns
+                        for val in values:
+                            if val is None:
+                                continue
+                                
+                            # Looking for date patterns
+                            if tournament_info['Date'] is None and re.search(r'\d{1,2}[\/\-\.]\d{1,2}[\/\-\.]\d{2,4}', val):
+                                tournament_info['Date'] = standardize_date(val)
+                            
+                            # Looking for tournament name patterns
+                            elif tournament_info['Name'] is None and any(keyword in val.lower() for keyword in ['tournament', 'championship', 'open', 'classic', 'invitational']):
+                                tournament_info['Name'] = val
+                            
+                            # Looking for course patterns
+                            elif tournament_info['Course'] is None and any(keyword in val.lower() for keyword in ['golf club', 'country club', 'course', 'links']):
+                                tournament_info['Course'] = val
+                            
+                            # Looking for location patterns with city, state
+                            elif (tournament_info['City'] is None or tournament_info['State'] is None) and re.search(r'([^,]+),\s*([A-Za-z]{2})', val):
+                                match = re.search(r'([^,]+),\s*([A-Za-z]{2})', val)
+                                city, state = match.groups()
+                                tournament_info['City'] = city.strip()
+                                tournament_info['State'] = standardize_state(state.strip())
+                            
+                            # Looking for zip code patterns
+                            elif tournament_info['Zip'] is None and re.search(r'\b\d{5}(?:-\d{4})?\b', val):
+                                tournament_info['Zip'] = standardize_zip(val)
+                        
+                        # Assign tournament name if we couldn't find one but have other data
+                        if tournament_info['Name'] is None and sum(1 for v in tournament_info.values() if v is not None) >= 2:
+                            # Assign first non-empty value as name
+                            for val in values:
+                                if val is not None and len(val) > 3:  # Avoid short strings
+                                    tournament_info['Name'] = f"Tournament {idx+1}"
+                                    break
+                        
+                        # Add if we found some useful information
+                        if sum(1 for v in tournament_info.values() if v is not None) >= 2:
+                            all_tournaments.append(tournament_info)
+        
+        # If we still don't have tournaments, create empty ones with default names
+        if not all_tournaments:
+            st.warning("Could not detect tournament data structure. Creating default entries.")
+            
+            # Create 10 empty tournaments with numbered names
+            for i in range(1, 11):
+                tournament_info = {col: None for col in REQUIRED_COLUMNS}
+                tournament_info['Name'] = f"Tournament {i}"
                 all_tournaments.append(tournament_info)
         
         # Convert to DataFrame
         tournaments_df = pd.DataFrame(all_tournaments)
+        
+        # Filter out rows where all required columns except Name are None/NaN
+        # (only keep rows that have at least one piece of information besides Name)
+        has_some_data = False
+        for col in REQUIRED_COLUMNS:
+            if col != 'Name' and tournaments_df[col].notna().any():
+                has_some_data = True
+                break
+        
+        if not has_some_data:
+            st.error("Could not extract meaningful tournament data from the file. Please check the file format.")
+            # Return empty DataFrame with the required columns
+            return pd.DataFrame(columns=REQUIRED_COLUMNS)
         
         # Filter out rows where all required columns are None/NaN
         tournaments_df = tournaments_df.dropna(subset=REQUIRED_COLUMNS, how='all')
@@ -343,6 +594,9 @@ def process_excel_file(file):
     
     except Exception as e:
         st.error(f"Error processing Excel file: {str(e)}")
+        # Show traceback for debugging
+        import traceback
+        st.code(traceback.format_exc())
         return pd.DataFrame(columns=REQUIRED_COLUMNS)
 
 def clean_golf_data(df):
@@ -445,11 +699,11 @@ def manual_entry_form(df):
                         if current_val:
                             try:
                                 date_val = pd.to_datetime(current_val)
-                                new_val = st.date_input(f"{col}", date_val, key=f"date_{idx}_{i}")
+                                new_val = st.date_input(f"{col}", date_val)
                             except:
-                                new_val = st.date_input(f"{col}", key=f"date_{idx}_{i}")
+                                new_val = st.date_input(f"{col}")
                         else:
-                            new_val = st.date_input(f"{col}", key=f"date_{idx}_{i}")
+                            new_val = st.date_input(f"{col}")
                         updated_values[col] = new_val.strftime('%Y-%m-%d') if new_val else None
                     elif col == 'State':
                         states = ["", "AL", "AK", "AZ", "AR", "CA", "CO", "CT", "DE", "FL", "GA", 
@@ -457,20 +711,21 @@ def manual_entry_form(df):
                                  "MA", "MI", "MN", "MS", "MO", "MT", "NE", "NV", "NH", "NJ", 
                                  "NM", "NY", "NC", "ND", "OH", "OK", "OR", "PA", "RI", "SC", 
                                  "SD", "TN", "TX", "UT", "VT", "VA", "WA", "WV", "WI", "WY", "DC"]
-                        new_val = st.selectbox(f"{col}", states, index=0 if not current_val else states.index(current_val), key=f"state_{idx}_{i}")
+                        new_val = st.selectbox(f"{col}", states, index=0 if not current_val else states.index(current_val))
                         updated_values[col] = new_val if new_val else None
                     elif col == 'Category':
+                        # Try to suggest categories based on existing data
                         existing_categories = df['Category'].dropna().unique().tolist()
                         categories = [""] + existing_categories
                         new_val = st.selectbox(f"{col}", categories, index=0 if not current_val else 
-                                             categories.index(current_val) if current_val in categories else 0, key=f"category_{idx}_{i}")
+                                             categories.index(current_val) if current_val in categories else 0)
                         updated_values[col] = new_val if new_val else None
                     else:
-                        new_val = st.text_input(f"{col}", current_val, key=f"text_{idx}_{i}")
+                        new_val = st.text_input(f"{col}", current_val)
                         updated_values[col] = new_val if new_val else None
                 
                 # Update button
-                if st.button(f"Update Tournament {i+1}", key=f"button_{idx}_{i}"):
+                if st.button(f"Update Tournament {i+1}"):
                     for col, val in updated_values.items():
                         df.at[idx, col] = val
                     st.success(f"Tournament {i+1} updated!")
