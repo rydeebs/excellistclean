@@ -97,21 +97,6 @@ def standardize_zip(zip_str):
     
     return zip_str
 
-def extract_location_info(location_str):
-    """Extract city and state from location string."""
-    if not location_str:
-        return None, None
-    
-    # Try to match "City, ST" or "City, State" pattern
-    location_match = re.search(r'([^,]+),\s*([A-Za-z]{2}|[A-Za-z\s]+)(?:\s+(\d{5}))?', location_str)
-    if location_match:
-        city = location_match.group(1).strip()
-        state = location_match.group(2).strip()
-        zip_code = location_match.group(3) if location_match.groups()[2] else None
-        return city, standardize_state(state), zip_code
-    
-    return None, None, None
-
 def parse_tournament_text(text):
     """Parse tournament text and extract structured data."""
     # Split the text into lines and remove empty lines
@@ -121,10 +106,11 @@ def parse_tournament_text(text):
     current_tournament = None
     
     # Define patterns
-    date_pattern = r'^(?:\*\*)?(January|February|March|April|May|June|July|August|September|October|November|December|Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[.,\s]+(\d{1,2})(?:\*\*)?$'
-    entries_close_pattern = r'Entries\s+Close:\s+(.*)'
+    championship_pattern = r'^(?:\*\*)?(.*?(?:Championship|Tournament|Cup|Series|Amateur|Open))(?:\s+\*+[A-Za-z\s]*\*+)?(?:\*\*)?$'
+    date_pattern = r'(?:\*\*)?(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun),\s+(January|February|March|April|May|June|July|August|September|October|November|December|Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[.,\s]+(\d{1,2})(?:,\s+(\d{4}))?(?:\*\*)?'
+    date_range_pattern = r'(?:\*\*)?(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun),\s+[A-Za-z]+\s+\d{1,2}(?:,\s+\d{4})?\s+-\s+(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun),\s+([A-Za-z]+)\s+(\d{1,2})(?:,\s+(\d{4}))?(?:\*\*)?'
     course_pattern = r'^(?:\*\*)?(.*?(?:Course|Club|GC|G&CC|Golf|Country|CC|National|International|Plantation))(?:\s+\*+[A-Za-z\s]*\*+)?(?:\*\*)?$'
-    location_pattern = r'(.*?),\s+([A-Za-z\s]+),\s+([A-Za-z]{2})(?:\s+(\d{5}))?'
+    status_pattern = r'(?:\*\*)?(OPEN|CLOSED|INVITATION LIST)(?:\*\*)?'
     
     i = 0
     year = "2025"  # Default year
@@ -132,91 +118,98 @@ def parse_tournament_text(text):
     while i < len(lines):
         line = lines[i]
         
-        # Check for date
-        date_match = re.search(date_pattern, line, re.IGNORECASE)
-        if date_match:
+        # Check for championship name
+        championship_match = re.search(championship_pattern, line)
+        if championship_match:
             # Save previous tournament if exists
-            if current_tournament and 'Name' in current_tournament:
+            if current_tournament and current_tournament.get('Name'):
                 tournaments.append(current_tournament)
             
             # Start new tournament
             current_tournament = {col: None for col in REQUIRED_COLUMNS}
-            month, day = date_match.groups()
-            # Format as YYYY-MM-DD
-            current_tournament['Date'] = standardize_date(f"{month} {day}", year)
+            tournament_name = championship_match.group(1).strip()
+            current_tournament['Name'] = tournament_name
+            
+            # Set default category based on name
+            if "Championship" in tournament_name:
+                current_tournament['Category'] = "Championship"
+            elif "Amateur" in tournament_name:
+                current_tournament['Category'] = "Amateur"
+            elif "Open" in tournament_name:
+                current_tournament['Category'] = "Open"
+            elif "Four-Ball" in tournament_name or "Foursomes" in tournament_name:
+                current_tournament['Category'] = "Four-Ball"
+            elif "Series" in tournament_name:
+                current_tournament['Category'] = "Series"
+            else:
+                current_tournament['Category'] = "Regular"
+            
             i += 1
             continue
         
-        # Check for entries close date (skip)
-        if re.search(entries_close_pattern, line):
+        # Check for date (single day)
+        date_match = re.search(date_pattern, line)
+        if date_match and current_tournament:
+            month, day, yr = date_match.groups()
+            current_year = yr if yr else year
+            current_tournament['Date'] = standardize_date(f"{month} {day} {current_year}")
             i += 1
             continue
         
-        # Check for course name (this will be the tournament name too)
+        # Check for date range (use end date)
+        date_range_match = re.search(date_range_pattern, line)
+        if date_range_match and current_tournament:
+            month, day, yr = date_range_match.groups()
+            current_year = yr if yr else year
+            current_tournament['Date'] = standardize_date(f"{month} {day} {current_year}")
+            i += 1
+            continue
+        
+        # Check for course/venue
         course_match = re.search(course_pattern, line)
         if course_match and current_tournament:
             course_name = course_match.group(1).strip()
-            
-            # Clean up any asterisks or special markers
-            course_name = re.sub(r'\*+[A-Za-z\s\-]*\*+', '', course_name).strip()
-            
-            # Set as both Name and Course
-            current_tournament['Name'] = course_name
             current_tournament['Course'] = course_name
             
-            # Check if the line contains category indicators
-            if "Four-Ball" in line or "FOUR-BALL" in line:
-                current_tournament['Category'] = "Four-Ball"
-            elif "Scramble" in line or "SCRAMBLE" in line:
-                current_tournament['Category'] = "Scramble"
-            else:
-                current_tournament['Category'] = "Regular"  # Default category
+            # Try to extract city from course name if it contains a comma
+            if ',' in course_name:
+                parts = course_name.split(',')
+                if len(parts) >= 2:
+                    current_tournament['City'] = parts[1].strip()
             
             i += 1
             continue
         
-        # Check for location line
-        location_match = re.search(location_pattern, line)
-        if location_match and current_tournament:
-            location_parts = [p.strip() for p in line.split(',')]
-            
-            if len(location_parts) >= 3:
-                # Format: Venue, City, State (maybe with ZIP)
-                venue = location_parts[0].strip()
-                city = location_parts[1].strip()
-                
-                # Parse state and possibly zip
-                state_zip = location_parts[2].strip()
-                state_parts = state_zip.split()
-                
-                if len(state_parts) >= 1:
-                    state = state_parts[0]
-                    current_tournament['State'] = standardize_state(state)
-                
-                if len(state_parts) >= 2:
-                    zip_code = state_parts[1]
-                    if re.search(r'\d{5}', zip_code):
-                        current_tournament['Zip'] = zip_code
-                
-                current_tournament['City'] = city
-                
-                # Update Course if we didn't get it earlier
-                if not current_tournament['Course']:
-                    current_tournament['Course'] = venue
-            
+        # Check for status (skip)
+        status_match = re.search(status_pattern, line)
+        if status_match:
             i += 1
             continue
         
-        # Other lines - skip
+        # Other lines - check if it might be a standalone venue
+        if current_tournament and not current_tournament.get('Course'):
+            if re.search(r'Country Club|Golf Club|Golf Course', line) and not line.startswith('**'):
+                current_tournament['Course'] = line.strip()
+            
         i += 1
     
     # Don't forget to add the last tournament
-    if current_tournament and 'Name' in current_tournament:
+    if current_tournament and current_tournament.get('Name'):
         tournaments.append(current_tournament)
     
     # Convert to DataFrame
-    tournaments_df = pd.DataFrame(tournaments)
-    return tournaments_df
+    if tournaments:
+        tournaments_df = pd.DataFrame(tournaments)
+        
+        # Ensure all required columns exist
+        for col in REQUIRED_COLUMNS:
+            if col not in tournaments_df.columns:
+                tournaments_df[col] = None
+                
+        return tournaments_df
+    else:
+        # Return empty DataFrame with all required columns
+        return pd.DataFrame(columns=REQUIRED_COLUMNS)
 
 def standardize_tournament_names(df):
     """Standardize tournament names and extract additional info."""
@@ -317,20 +310,22 @@ def fill_missing_data(df):
 st.subheader("Enter Tournament Text Data")
 
 # Default text example
-default_text = """**Dates**
-**Event Information**
-**May 7**
-Entries Close: May 2, 2025
-**The Club at Admirals Cove - North/West Course *****FULL***
-The Club at Admirals Cove, Jupiter, FL
-Tee Times & Info   Results  
-Enter Late
-**May 7**
-Entries Close: May 2, 2025
-**LPGA International - Jones Course *****FULL***
-LPGA International, Daytona Beach, FL
-Tee Times & Info   Results  
-Enter Late"""
+default_text = """**125th WPGA Amateur Championship - Qualifying**
+**Tee Sheet**
+**Thu, May 8 - Wed, Jun 4, 2025**
+**Next Round: Thu, May 8, 2025**
+Multiple Courses
+**CLOSED**
+**122nd WPGA Open Championship - Qualifying**
+**Tee Sheet**
+**Results**
+**Wed, Apr 30 - Thu, May 15, 2025**
+**Next Round: Thu, May 15, 2025**
+Montour Heights Country Club
+Willowbrook Country Club
+**OPEN**
+**closes on**
+**WED, MAY 07 5:00 PM EDT**"""
 
 # Text area for input
 tournament_text = st.text_area(
@@ -358,6 +353,22 @@ if st.button("Process Tournament Data"):
         try:
             # Parse the text
             df = parse_tournament_text(tournament_text)
+            
+            # Display the raw parsed data for debugging
+            st.subheader("Raw Parsed Data")
+            st.write(f"Found {len(df)} tournaments")
+            st.write(f"Columns: {list(df.columns)}")
+            
+            # Check if DataFrame is empty or missing required columns
+            if df.empty:
+                st.error("No tournaments could be extracted from the text. Please check the format.")
+                # Create an empty DataFrame with all required columns
+                df = pd.DataFrame(columns=REQUIRED_COLUMNS)
+            else:
+                # Ensure all required columns exist
+                for col in REQUIRED_COLUMNS:
+                    if col not in df.columns:
+                        df[col] = None
             
             # Standardize names
             df = standardize_tournament_names(df)
@@ -474,8 +485,8 @@ if st.button("Process Tournament Data"):
                     st.write("Tournament Count by Month")
                     month_counts = df['Month'].value_counts()
                     st.bar_chart(month_counts)
-                except:
-                    st.write("Could not analyze tournament count by month due to date format issues.")
+                except Exception as e:
+                    st.write(f"Could not analyze tournament count by month: {str(e)}")
         
         except Exception as e:
             st.error(f"Error processing text: {str(e)}")
@@ -499,22 +510,28 @@ with st.sidebar:
     
     ### Expected Text Format:
     
-    The app works best with data structured like:
+    The app is designed to handle tournament data in various formats, including:
+    
+    1. WPGA Championship format:
     ```
-    **Month Day**
-    [Optional entries close info]
-    **Course Name/Tournament Name**
-    Location, City, State
-    [Optional additional info]
+    **125th WPGA Amateur Championship - Qualifying**
+    **Tee Sheet**
+    **Thu, May 8 - Wed, Jun 4, 2025**
+    Montour Heights Country Club
     ```
     
-    ### Example:
+    2. Standard tournament format:
     ```
     **May 7**
-    Entries Close: May 2, 2025
     **The Club at Admirals Cove**
     The Club at Admirals Cove, Jupiter, FL
     ```
+    
+    The parser will try to extract:
+    - Tournament name
+    - Date(s)
+    - Course name
+    - Location information
     """)
     
     st.header("Required Columns")
@@ -527,4 +544,13 @@ with st.sidebar:
     - City (location city)
     - State (location state, 2-letter code)
     - Zip (5-digit zip code)
+    """)
+    
+    st.header("Additional Help")
+    st.write("""
+    If the parser doesn't extract all data correctly, you can:
+    
+    1. Use the "Fill Missing Data" section to manually add missing information
+    2. Try reformatting your text to match one of the expected formats
+    3. Check the error messages and debug information for hints on what went wrong
     """)
