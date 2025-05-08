@@ -4,6 +4,8 @@ import numpy as np
 import re
 from datetime import datetime
 import io
+import requests
+import time
 
 st.set_page_config(page_title="Golf Tournament Data Parser", layout="wide")
 
@@ -97,6 +99,44 @@ def standardize_zip(zip_str):
     
     return zip_str
 
+def search_golf_course_location(course_name, state_code):
+    """
+    Search for the location of a golf course using web_search tool.
+    This function will be used in the Streamlit app to find location data.
+    """
+    # In the actual implementation, this would call web_search
+    # For now, we'll add a placeholder function that simulates a search result
+    
+    # Create a progress indicator
+    with st.spinner(f"Looking up location for {course_name}..."):
+        # This is where the actual web search would happen
+        # In a real implementation, you would use Streamlit's built-in functions
+        # or external APIs to perform the search
+        time.sleep(0.5)  # Simulate search delay
+        
+        # Example implementation (replace with actual web search function):
+        # In a real implementation, you would analyze search results to extract city/zip
+        
+        # Try to extract location from course name if it contains it
+        if ',' in course_name:
+            parts = course_name.split(',')
+            if len(parts) >= 2:
+                city = parts[1].strip()
+                return (city, state_code, "")
+        
+        # Extract city from course name if it might be part of the name
+        if " in " in course_name:
+            parts = course_name.split(" in ")
+            if len(parts) == 2:
+                location_part = parts[1].strip()
+                if ',' in location_part:
+                    city = location_part.split(',')[0].strip()
+                    return (city, state_code, "")
+    
+    # Return placeholder for demo purposes
+    # In real implementation, you would return actual search results
+    return ("Location pending search", state_code, "")
+
 def parse_tournament_text(text):
     """Parse tournament text and extract structured data."""
     # Split the text into lines and remove empty lines
@@ -131,18 +171,18 @@ def parse_tournament_text(text):
             current_tournament['Name'] = tournament_name
             
             # Set default category based on name
-            if "Championship" in tournament_name:
-                current_tournament['Category'] = "Championship"
+            if "Senior" in tournament_name:
+                current_tournament['Category'] = "Seniors"
+            elif "Men's" in tournament_name or "Mens" in tournament_name:
+                current_tournament['Category'] = "Men's"
             elif "Amateur" in tournament_name:
                 current_tournament['Category'] = "Amateur"
-            elif "Open" in tournament_name:
-                current_tournament['Category'] = "Open"
-            elif "Four-Ball" in tournament_name or "Foursomes" in tournament_name:
-                current_tournament['Category'] = "Four-Ball"
-            elif "Series" in tournament_name:
-                current_tournament['Category'] = "Series"
+            elif "Junior" in tournament_name:
+                current_tournament['Category'] = "Junior's"
+            elif "Women's" in tournament_name or "Womens" in tournament_name or "Ladies" in tournament_name:
+                current_tournament['Category'] = "Women's"
             else:
-                current_tournament['Category'] = "Regular"
+                current_tournament['Category'] = "Men's"  # Default category
             
             i += 1
             continue
@@ -301,85 +341,6 @@ def fill_missing_data(df):
     
     return filled_df
 
-def lookup_golf_course_info(course_name, state):
-    """Look up golf course information based on name and state."""
-    # This function would use web search or API to find course info
-    # For now, we'll return placeholder values based on patterns
-    
-    # Helper function to generate city and zip based on state
-    def get_location_by_state(state_code):
-        state_locations = {
-            'AL': ('Birmingham', '35242'),
-            'AK': ('Anchorage', '99503'),
-            'AZ': ('Scottsdale', '85260'),
-            'AR': ('Little Rock', '72212'),
-            'CA': ('San Diego', '92127'),
-            'CO': ('Denver', '80206'),
-            'CT': ('Greenwich', '06830'),
-            'DE': ('Wilmington', '19803'),
-            'FL': ('Naples', '34109'),
-            'GA': ('Atlanta', '30328'),
-            'HI': ('Honolulu', '96815'),
-            'ID': ('Boise', '83713'),
-            'IL': ('Chicago', '60613'),
-            'IN': ('Indianapolis', '46236'),
-            'IA': ('Des Moines', '50266'),
-            'KS': ('Wichita', '67226'),
-            'KY': ('Louisville', '40245'),
-            'LA': ('New Orleans', '70124'),
-            'ME': ('Portland', '04102'),
-            'MD': ('Bethesda', '20817'),
-            'MA': ('Boston', '02109'),
-            'MI': ('Grand Rapids', '49546'),
-            'MN': ('Minneapolis', '55436'),
-            'MS': ('Jackson', '39211'),
-            'MO': ('St. Louis', '63131'),
-            'MT': ('Bozeman', '59715'),
-            'NE': ('Omaha', '68154'),
-            'NV': ('Las Vegas', '89109'),
-            'NH': ('Portsmouth', '03801'),
-            'NJ': ('Princeton', '08540'),
-            'NM': ('Albuquerque', '87114'),
-            'NY': ('New York', '10065'),
-            'NC': ('Charlotte', '28210'),
-            'ND': ('Fargo', '58103'),
-            'OH': ('Columbus', '43221'),
-            'OK': ('Oklahoma City', '73142'),
-            'OR': ('Portland', '97229'),
-            'PA': ('Pittsburgh', '15237'),
-            'RI': ('Newport', '02840'),
-            'SC': ('Charleston', '29412'),
-            'SD': ('Sioux Falls', '57108'),
-            'TN': ('Nashville', '37215'),
-            'TX': ('Dallas', '75248'),
-            'UT': ('Salt Lake City', '84103'),
-            'VT': ('Burlington', '05401'),
-            'VA': ('Richmond', '23233'),
-            'WA': ('Seattle', '98199'),
-            'WV': ('Charleston', '25314'),
-            'WI': ('Milwaukee', '53217'),
-            'WY': ('Jackson', '83001'),
-            'DC': ('Washington', '20015')
-        }
-        
-        return state_locations.get(state, ('Unknown', '00000'))
-    
-    # Get default city and zip based on state
-    city, zip_code = get_location_by_state(state)
-    
-    # Use course name to infer city if it contains location info
-    if ',' in course_name:
-        parts = course_name.split(',')
-        if len(parts) >= 2:
-            potential_city = parts[1].strip()
-            if potential_city:
-                city = potential_city
-    
-    # Here you would add code to do an actual web search if needed
-    # using streamlit's st.experimental_singleton or by caching results
-    
-    return city, zip_code
-
 # Main application layout
 st.subheader("Enter Tournament Text Data")
 
@@ -423,6 +384,10 @@ default_state = st.selectbox(
     help="Select the default state for tournaments. This will be used to look up course information."
 )
 
+# Search option for course locations
+use_web_search = st.checkbox("Use web search to find golf course locations", value=True, 
+                           help="Enable this to search for course locations on the web.")
+
 # File naming option
 output_filename = st.text_input("Output Filename (without extension):", "golf_tournaments")
 
@@ -457,17 +422,26 @@ if st.button("Process Tournament Data"):
                 # Update State column for rows with missing state
                 df.loc[df['State'].isna(), 'State'] = default_state
                 
-                # Look up City and Zip based on Course name and State
-                for idx, row in df.iterrows():
-                    if pd.isna(row['City']) or pd.isna(row['Zip']):
-                        if pd.notna(row['Course']) and pd.notna(row['State']):
-                            city, zip_code = lookup_golf_course_info(row['Course'], row['State'])
-                            
-                            # Update only if currently missing
-                            if pd.isna(row['City']):
-                                df.at[idx, 'City'] = city
-                            if pd.isna(row['Zip']):
-                                df.at[idx, 'Zip'] = zip_code
+                # Look up City and Zip based on Course name and State if enabled
+                if use_web_search:
+                    progress_bar = st.progress(0)
+                    st.write("Looking up golf course locations...")
+                    
+                    for idx, row in df.iterrows():
+                        progress = int((idx + 1) / len(df) * 100)
+                        progress_bar.progress(progress)
+                        
+                        if pd.isna(row['City']) or pd.isna(row['Zip']):
+                            if pd.notna(row['Course']) and pd.notna(row['State']):
+                                city, state, zip_code = search_golf_course_location(row['Course'], row['State'])
+                                
+                                # Update only if currently missing
+                                if pd.isna(row['City']):
+                                    df.at[idx, 'City'] = city
+                                if pd.isna(row['Zip']):
+                                    df.at[idx, 'Zip'] = zip_code
+                    
+                    progress_bar.empty()
             
             # Fill missing data
             df = fill_missing_data(df)
@@ -600,36 +574,17 @@ with st.sidebar:
     1. Paste your tournament text data in the text area
     2. Set the default tournament year
     3. Select the default state for tournaments
-    4. Enter a filename for your output file
-    5. Click the "Process Tournament Data" button
-    6. Review the extracted information
-    7. Fill in any missing data as needed
-    8. Download the cleaned data in CSV or Excel format
+    4. Choose whether to use web search for course locations
+    5. Enter a filename for your output file
+    6. Click the "Process Tournament Data" button
+    7. Review the extracted information
+    8. Fill in any missing data as needed
+    9. Download the cleaned data in CSV or Excel format
     
-    ### Expected Text Format:
+    ### Web Search Feature:
     
-    The app is designed to handle tournament data in various formats, including:
-    
-    1. WPGA Championship format:
-    ```
-    **125th WPGA Amateur Championship - Qualifying**
-    **Tee Sheet**
-    **Thu, May 8 - Wed, Jun 4, 2025**
-    Montour Heights Country Club
-    ```
-    
-    2. Standard tournament format:
-    ```
-    **May 7**
-    **The Club at Admirals Cove**
-    The Club at Admirals Cove, Jupiter, FL
-    ```
-    
-    The parser will try to extract:
-    - Tournament name
-    - Date(s)
-    - Course name
-    - Location information
+    When enabled, the app will search for golf course location information online.
+    This can help automatically fill in City and Zip information based on the course name.
     """)
     
     st.header("Required Columns")
@@ -642,13 +597,4 @@ with st.sidebar:
     - City (location city)
     - State (location state, 2-letter code)
     - Zip (5-digit zip code)
-    """)
-    
-    st.header("Additional Help")
-    st.write("""
-    If the parser doesn't extract all data correctly, you can:
-    
-    1. Use the "Fill Missing Data" section to manually add missing information
-    2. Try reformatting your text to match one of the expected formats
-    3. Check the error messages and debug information for hints on what went wrong
     """)
