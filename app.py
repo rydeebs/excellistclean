@@ -82,8 +82,118 @@ def standardize_state(state_str):
     # If it's a full state name
     return state_dict.get(state_str, state_str)
 
+def detect_format(text):
+    """Detect which format the text is in."""
+    # Split the text into lines and check for patterns
+    lines = [line.strip() for line in text.split('\n') if line.strip()]
+    
+    # Check for tabular format with Date, Tournaments columns (Format 3)
+    if len(lines) > 0 and lines[0].startswith("Date") and "Tournaments" in lines[0]:
+        return "TABULAR"
+    
+    # Check for Championship format (Format 2)
+    championship_count = 0
+    for line in lines[:20]:  # Check first 20 lines
+        if re.search(r'(?:\*\*)?(.*?(?:Championship|Tournament|Cup|Series|Amateur|Open))', line):
+            championship_count += 1
+    
+    if championship_count >= 2:
+        return "CHAMPIONSHIP"
+    
+    # Otherwise assume it's the simple format (Format 1)
+    return "SIMPLE"
+
 def parse_tournament_text(text):
-    """Parse tournament text and extract structured data."""
+    """Parse tournament text and extract structured data based on detected format."""
+    # Detect format
+    format_type = detect_format(text)
+    st.write(f"Detected format: {format_type}")
+    
+    if format_type == "TABULAR":
+        return parse_tabular_format(text)
+    elif format_type == "CHAMPIONSHIP":
+        return parse_championship_format(text)
+    else:
+        return parse_simple_format(text)
+    
+def parse_tabular_format(text):
+    """Parse tabular format with columns like 'Date', 'Tournaments', etc."""
+    lines = [line.strip() for line in text.split('\n') if line.strip()]
+    
+    tournaments = []
+    current_tournament = None
+    current_date = None
+    
+    # Skip header line
+    i = 1
+    
+    while i < len(lines):
+        line = lines[i]
+        
+        # Check for date (Apr 13, May 4, etc.)
+        date_match = re.match(r'^(January|February|March|April|May|June|July|August|September|October|November|December|Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+(\d{1,2})(?:\-\d{1,2})?$', line)
+        if date_match:
+            # We found a date, start a new tournament
+            month, day = date_match.groups()
+            current_date = standardize_date(f"{month} {day}", "2025")
+            i += 1
+            continue
+        
+        # Look for a tournament name pattern (often has "About" at the end)
+        tournament_name_match = line.strip()
+        if tournament_name_match and line != "Info" and line != "Leaderboard" and line != "T" and "View leaderboard" not in line:
+            # This might be a tournament name or course name
+            
+            # Check if it's a course line (has a city and state)
+            location_match = re.search(r'(.*?)\s+·\s+(.*?),\s+([A-Z]{2})$', line)
+            if location_match:
+                course, city, state = location_match.groups()
+                
+                # If we have a date, let's create a tournament
+                if current_date:
+                    # Save previous tournament if exists
+                    if current_tournament:
+                        tournaments.append(current_tournament)
+                    
+                    # Get the tournament name from the previous line if possible
+                    tournament_name = lines[i-2] if i >= 2 and lines[i-2] not in ["Info", "Leaderboard", "T"] and not re.match(r'^(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)', lines[i-2]) else course
+                    
+                    # Create new tournament
+                    current_tournament = {
+                        'Date': current_date,
+                        'Name': tournament_name.strip(),
+                        'Course': course.strip(),
+                        'Category': "Men's",  # Default category
+                        'City': city.strip(),
+                        'State': standardize_state(state.strip()),
+                        'Zip': None
+                    }
+            
+            # If it doesn't have location, it might be a tournament name
+            # We'll process it later when we find the course
+            
+        i += 1
+    
+    # Don't forget to add the last tournament
+    if current_tournament:
+        tournaments.append(current_tournament)
+    
+    # Convert to DataFrame
+    if tournaments:
+        tournaments_df = pd.DataFrame(tournaments)
+        
+        # Ensure all required columns exist
+        for col in REQUIRED_COLUMNS:
+            if col not in tournaments_df.columns:
+                tournaments_df[col] = None
+                
+        return tournaments_df
+    else:
+        # Return empty DataFrame with all required columns
+        return pd.DataFrame(columns=REQUIRED_COLUMNS)
+
+def parse_championship_format(text):
+    """Parse championship format with tournament names in titles."""
     # Split the text into lines and remove empty lines
     lines = [line.strip() for line in text.split('\n') if line.strip()]
     
@@ -91,10 +201,106 @@ def parse_tournament_text(text):
     current_tournament = None
     
     # Define patterns
-    # Simple date pattern (May 7)
+    championship_pattern = r'^(?:\*\*)?(.*?(?:Championship|Tournament|Cup|Series|Amateur|Open|Four-Ball|Scramble|Father|Son|Parent|Child|Brothers|Foursomes))(?:\s+\*+[A-Za-z\s]*\*+)?(?:\*\*)?$'
+    full_date_pattern = r'(?:\*\*)?(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun),\s+(January|February|March|April|May|June|July|August|September|October|November|December|Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[.,\s]+(\d{1,2})(?:,\s+(\d{4}))?(?:\*\*)?'
+    date_range_pattern = r'(?:\*\*)?(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun),\s+[A-Za-z]+\s+\d{1,2}(?:,\s+\d{4})?\s+-\s+(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun),\s+([A-Za-z]+)\s+(\d{1,2})(?:,\s+(\d{4}))?(?:\*\*)?'
+    status_pattern = r'(?:\*\*)?(OPEN|CLOSED|INVITATION LIST)(?:\*\*)?'
+    
+    i = 0
+    year = "2025"  # Default year
+    
+    while i < len(lines):
+        line = lines[i]
+        
+        # Check for championship name
+        championship_match = re.search(championship_pattern, line)
+        if championship_match:
+            # Save previous tournament if exists
+            if current_tournament and current_tournament.get('Name'):
+                tournaments.append(current_tournament)
+            
+            # Start new tournament
+            current_tournament = {col: None for col in REQUIRED_COLUMNS}
+            tournament_name = championship_match.group(1).strip()
+            current_tournament['Name'] = tournament_name
+            
+            # Set default category based on name
+            if "Senior" in tournament_name:
+                current_tournament['Category'] = "Seniors"
+            elif "Men's" in tournament_name or "Mens" in tournament_name:
+                current_tournament['Category'] = "Men's"
+            elif "Amateur" in tournament_name:
+                current_tournament['Category'] = "Amateur"
+            elif "Junior" in tournament_name:
+                current_tournament['Category'] = "Junior's"
+            elif "Women's" in tournament_name or "Womens" in tournament_name or "Ladies" in tournament_name:
+                current_tournament['Category'] = "Women's"
+            else:
+                current_tournament['Category'] = "Men's"  # Default category
+            
+            i += 1
+            continue
+        
+        # Check for full date (Mon, May 7, 2025)
+        date_match = re.search(full_date_pattern, line)
+        if date_match and current_tournament:
+            month, day, yr = date_match.groups()
+            current_year = yr if yr else year
+            current_tournament['Date'] = standardize_date(f"{month} {day} {current_year}")
+            i += 1
+            continue
+        
+        # Check for date range (Mon, May 7 - Wed, May 9, 2025)
+        date_range_match = re.search(date_range_pattern, line)
+        if date_range_match and current_tournament:
+            month, day, yr = date_range_match.groups()
+            current_year = yr if yr else year
+            current_tournament['Date'] = standardize_date(f"{month} {day} {current_year}")
+            i += 1
+            continue
+        
+        # Skip status lines (OPEN, CLOSED, etc.)
+        if re.match(status_pattern, line):
+            i += 1
+            continue
+        
+        # Look for a potential course name (not starting with **)
+        if current_tournament and not current_tournament.get('Course') and not line.startswith('**'):
+            # This might be a course name
+            if re.search(r'(?:Club|Course|CC|GC|G&CC|Golf|Country)', line):
+                current_tournament['Course'] = line.strip()
+            
+        i += 1
+    
+    # Don't forget to add the last tournament
+    if current_tournament and current_tournament.get('Name'):
+        tournaments.append(current_tournament)
+    
+    # Convert to DataFrame
+    if tournaments:
+        tournaments_df = pd.DataFrame(tournaments)
+        
+        # Ensure all required columns exist
+        for col in REQUIRED_COLUMNS:
+            if col not in tournaments_df.columns:
+                tournaments_df[col] = None
+                
+        return tournaments_df
+    else:
+        # Return empty DataFrame with all required columns
+        return pd.DataFrame(columns=REQUIRED_COLUMNS)
+
+def parse_simple_format(text):
+    """Parse simple format with dates followed by course info."""
+    # Split the text into lines and remove empty lines
+    lines = [line.strip() for line in text.split('\n') if line.strip()]
+    
+    tournaments = []
+    current_tournament = None
+    
+    # Define patterns
     simple_date_pattern = r'^(January|February|March|April|May|June|July|August|September|October|November|December|Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+(\d{1,2})$'
     entries_close_pattern = r'^Entries\s+Close:'
-    course_pattern = r'^(?:.*?)(?:Club|Course|CC|GC|G&CC|Golf|Country)(?:.*?)$'
     location_pattern = r'(.*?),\s+([A-Za-z\s]+),\s+([A-Za-z]{2})'
     
     i = 0
@@ -192,24 +398,27 @@ def standardize_tournament_names(df):
     # Standardize course names and set as tournament names
     for idx, row in cleaned_df.iterrows():
         course = row.get('Course')
+        name = row.get('Name')
+        
         if pd.isna(course):
             continue
             
         # Clean up course name
-        course = re.sub(r'\s+\*+[A-Za-z\s\-]*\*+', '', course)
+        course = re.sub(r'\s+\*+[A-Za-z\s\-]*\*+', '', str(course))
         course = course.strip()
         
         # Update course name
         cleaned_df.at[idx, 'Course'] = course
         
         # Use course name as tournament name if name is missing
-        if pd.isna(row.get('Name')):
+        if pd.isna(name):
             cleaned_df.at[idx, 'Name'] = course
         
         # If we already have a tournament name, make sure it's clean
-        elif not pd.isna(row.get('Name')):
-            name = row.get('Name')
-            name = re.sub(r'\s+\*+[A-Za-z\s\-]*\*+', '', name)
+        elif not pd.isna(name):
+            name = re.sub(r'\s+\*+[A-Za-z\s\-]*\*+', '', str(name))
+            # Remove "About" suffix if present
+            name = re.sub(r'\s+About$', '', name)
             cleaned_df.at[idx, 'Name'] = name.strip()
     
     # Extract information from course names
@@ -260,8 +469,14 @@ def fill_missing_data(df):
 # Main application layout
 st.subheader("Enter Tournament Text Data")
 
-# Default text example
-default_text = """May 7
+# Example selector
+format_option = st.selectbox(
+    "Select an example format:",
+    ["Format 1: Simple List", "Format 2: Championship List", "Format 3: Tabular List"]
+)
+
+# Default text examples
+format1_example = """May 7
 Entries Close: May 2, 2025
 The Club at Admirals Cove - North/West Course *FULL*
 The Club at Admirals Cove, Jupiter, FL
@@ -270,12 +485,54 @@ May 7
 Entries Close: May 2, 2025
 LPGA International - Jones Course *FULL*
 LPGA International, Daytona Beach, FL
-Tee Times & Info   Results  
-May 8
-Entries Close: May 3, 2025
-LPGA International - Hills Course *FULL*
-LPGA International, Daytona Beach, FL
 Tee Times & Info   Results"""
+
+format2_example = """**CLOSED**
+**125th WPGA Amateur Championship - Qualifying**
+**Tee Sheet**
+**Results**
+**Thu, May 8 - Wed, Jun 4, 2025**
+**Next Round: Thu, May 8, 2025**
+Multiple Courses
+**CLOSED**
+**122nd WPGA Open Championship - Qualifying**
+**Tee Sheet**
+**Results**
+**Wed, Apr 30 - Thu, May 15, 2025**
+**Next Round: Thu, May 15, 2025**
+Montour Heights Country Club
+Willowbrook Country Club"""
+
+format3_example = """Date	Tournaments	Info	Tournament Types	Favorite	Results
+Apr 13	
+	
+SilverRock  About
+SilverRock Resort	  ·  	
+La Quinta, CA
+Leaderboard	T		
+View leaderboard
+Apr 13	
+	
+The Boulder City Championship  About
+Boulder City	  ·  	
+Boulder City, NV
+Leaderboard	T		
+View leaderboard
+Apr 14	
+	
+OAK TREE SPRING OPEN
+Oak Tree CC- East	  ·  	
+Edmond, OK
+Leaderboard	T		
+View leaderboard"""
+
+# Select the default text based on the chosen format
+if format_option == "Format 1: Simple List":
+    default_text = format1_example
+elif format_option == "Format 2: Championship List":
+    default_text = format2_example
+else:
+    default_text = format3_example
 
 # Text area for input
 tournament_text = st.text_area(
@@ -456,7 +713,7 @@ with st.sidebar:
     st.write("""
     ### How to Use This App:
     
-    1. Paste your tournament text data in the text area
+    1. Select an example format or paste your own tournament text data
     2. Set the default tournament year
     3. Select the default state for tournaments (optional)
     4. Enter a filename for your output file
@@ -465,14 +722,33 @@ with st.sidebar:
     7. Fill in any missing data as needed
     8. Download the cleaned data in CSV or Excel format
     
-    ### Expected Text Format:
+    ### Supported Formats:
     
-    The app works best with data formatted like:
+    The app supports three main formats of tournament data:
+    
+    **Format 1 - Simple List:**
     ```
     May 7
     Entries Close: May 2, 2025
     The Club at Admirals Cove - North/West Course
     The Club at Admirals Cove, Jupiter, FL
+    ```
+    
+    **Format 2 - Championship List:**
+    ```
+    **125th WPGA Amateur Championship - Qualifying**
+    **Tee Sheet**
+    **Thu, May 8 - Wed, Jun 4, 2025**
+    Montour Heights Country Club
+    ```
+    
+    **Format 3 - Tabular List:**
+    ```
+    Date    Tournaments    Info    Tournament Types    Favorite    Results
+    Apr 13  
+        SilverRock  About
+        SilverRock Resort    ·    
+        La Quinta, CA
     ```
     
     ### Required Columns:
