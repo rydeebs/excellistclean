@@ -118,189 +118,99 @@ def parse_tournament_text(text):
     
 def parse_tabular_format(text):
     """Parse tabular format with columns like 'Date', 'Tournaments', etc."""
-    lines = [line for line in text.split('\n') if line.strip()]
+    lines = [line for line in text.split('\n')]
     
     tournaments = []
-    current_date = None
-    current_tournament_name = None
     
     # Skip header line
     i = 1
     
-    while i < len(lines):
+    while i < len(lines) - 3:  # Need at least 4 lines for a complete tournament entry
         line = lines[i].strip()
         
         # Check for date pattern (Apr 13, May 4, etc.)
-        date_match = re.match(r'^(January|February|March|April|May|June|July|August|September|October|November|December|Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+(\d{1,2})(?:\-\d{1,2})?$', line)
+        date_match = re.match(r'^(January|February|March|April|May|June|July|August|September|October|November|December|Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+(\d{1,2})(?:\-\d{1,2})?', line)
         
         if date_match:
-            # We found a date, update the current date
-            month, day = date_match.groups()
-            current_date = standardize_date(f"{month} {day}", "2025")
-            i += 1
-            continue
-        
-        # Check for tournament name (usually follows a date line)
-        if current_date and line and not line.isspace() and not re.match(r'^(Leaderboard|Info|T|M|View leaderboard|Register)', line):
-            # This might be a tournament name
-            tournament_name = line
-            
-            # Remove "About" suffix if present
-            tournament_name = re.sub(r'\s+About$', '', tournament_name)
-            
-            # Store the tournament name
-            current_tournament_name = tournament_name
-            
-            # Move to next line
-            i += 1
-            
-            # Check if next line has course/location information
-            if i < len(lines):
-                course_line = lines[i].strip()
-                
-                # Look for a line with " · " separator or similar
-                location_match = re.search(r'(.*?)(?:\s+·\s+|\s{2,})(.*?),\s+([A-Z]{2})$', course_line)
-                
-                if location_match:
-                    course, city, state = location_match.groups()
-                    
-                    # Create a tournament entry
-                    tournament = {
-                        'Date': current_date,
-                        'Name': current_tournament_name.strip(),
-                        'Course': course.strip(),
-                        'Category': "Men's",  # Default category
-                        'City': city.strip(),
-                        'State': standardize_state(state.strip()),
-                        'Zip': None
-                    }
-                    
-                    # Determine category based on tournament name
-                    if "Amateur" in current_tournament_name:
-                        tournament['Category'] = "Amateur"
-                    elif "Senior" in current_tournament_name:
-                        tournament['Category'] = "Seniors"
-                    elif "Women" in current_tournament_name or "Ladies" in current_tournament_name:
-                        tournament['Category'] = "Women's"
-                    elif "Junior" in current_tournament_name:
-                        tournament['Category'] = "Junior's"
-                    
-                    tournaments.append(tournament)
-                
-        # Always move to next line after processing
-        i += 1
-    
-    # Convert to DataFrame
-    if tournaments:
-        tournaments_df = pd.DataFrame(tournaments)
-        
-        # Ensure all required columns exist
-        for col in REQUIRED_COLUMNS:
-            if col not in tournaments_df.columns:
-                tournaments_df[col] = None
-                
-        return tournaments_df
-    else:
-        # Return empty DataFrame with all required columns
-        st.warning("No tournaments found in tabular format. Attempting alternative parsing...")
-        return parse_tabular_format_alternative(text)
-
-def parse_tabular_format_alternative(text):
-    """Alternative parser for tabular format that's more forgiving."""
-    lines = [line for line in text.split('\n') if line.strip()]
-    
-    tournaments = []
-    current_date = None
-    
-    # Skip header line
-    i = 1
-    
-    while i < len(lines) - 1:  # Need at least 2 lines for a complete entry
-        current_line = lines[i].strip()
-        
-        # Check for date pattern
-        date_match = re.match(r'^(January|February|March|April|May|June|July|August|September|October|November|December|Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+(\d{1,2})(?:\-\d{1,2})?', current_line)
-        
-        if date_match:
-            # We found a date, store it
+            # We found a date, extract it
             month, day = date_match.groups()
             current_date = standardize_date(f"{month} {day}", "2025")
             
-            # Advance to next non-empty line
-            i += 1
-            while i < len(lines) and not lines[i].strip():
-                i += 1
+            # Store the date and look ahead for tournament info
+            tournament_data = {'Date': current_date, 'Name': None, 'Course': None, 'City': None, 'State': None, 'Zip': None, 'Category': "Men's"}
             
-            # Skip lines until we find something that might be a tournament name
-            tournament_name = None
-            while i < len(lines):
-                line = lines[i].strip()
+            # Look ahead up to 10 lines for tournament info
+            j = i + 1
+            name_found = False
+            course_found = False
+            location_found = False
+            
+            while j < min(i + 10, len(lines)) and not (name_found and course_found and location_found):
+                line_j = lines[j].strip()
                 
-                # Skip empty or marker lines
-                if not line or line in ["Leaderboard", "Info", "T", "M", "View leaderboard", "Register"]:
-                    i += 1
+                # Skip empty lines and markers
+                if not line_j or line_j in ["Leaderboard", "Info", "T", "M", "View leaderboard", "Register"] or \
+                   line_j.startswith("View") or line_j.startswith("Favorite"):
+                    j += 1
                     continue
                 
-                # If has a dot or bullet or "About", likely a tournament line
-                if "About" in line or "·" in line:
-                    tournament_name = line.split("About")[0].strip() if "About" in line else line
-                    i += 1
+                # Check if this is another date line (which would mean we've moved to next tournament)
+                if re.match(r'^(January|February|March|April|May|June|July|August|September|October|November|December|Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d{1,2}', line_j):
                     break
                 
-                # Otherwise, just take this as the tournament name
-                tournament_name = line
-                i += 1
-                break
-            
-            # Now look for course and location in the next few lines
-            course_name = None
-            city = None
-            state = None
-            
-            # Search next 3 lines for location
-            for j in range(i, min(i+3, len(lines))):
-                line = lines[j].strip()
+                # If tournament name not set, this could be it (if it doesn't look like a location line)
+                if not name_found and not '\t' in line_j and not '  ·  ' in line_j and not ',' in line_j:
+                    tournament_data['Name'] = re.sub(r'\s+About$', '', line_j)
+                    name_found = True
                 
-                # Skip empty lines
-                if not line:
-                    continue
+                # Look for course name (line with tabs or dot separators)
+                elif not course_found and ('\t' in line_j or '  ·  ' in line_j):
+                    parts = re.split(r'\t+|\s{2,}·\s{2,}|\s{2,}', line_j)
+                    if parts and parts[0].strip():
+                        tournament_data['Course'] = parts[0].strip()
+                        course_found = True
                 
-                # Look for location pattern (with state abbreviation)
-                location_match = re.search(r'(.+?)(?:\s+·\s+|\s{2,})(.+?),\s+([A-Z]{2})$', line)
-                if location_match:
-                    course_name, city, state = location_match.groups()
-                    i = j + 1  # Skip to next line after location
-                    break
+                # Look for city and state
+                elif not location_found and ',' in line_j:
+                    location_match = re.search(r'(.*?),\s+([A-Z]{2})(?:\s|$)', line_j)
+                    if location_match:
+                        city, state = location_match.groups()
+                        tournament_data['City'] = city.strip()
+                        tournament_data['State'] = standardize_state(state.strip())
+                        location_found = True
+                
+                j += 1
             
-            # If we have enough data, create a tournament entry
-            if tournament_name and course_name and city and state:
-                tournament = {
-                    'Date': current_date,
-                    'Name': tournament_name.strip(),
-                    'Course': course_name.strip(),
-                    'Category': "Men's",  # Default category
-                    'City': city.strip(),
-                    'State': standardize_state(state.strip()),
-                    'Zip': None
-                }
+            # If we found at least a name or course, add this tournament
+            if tournament_data['Name'] or tournament_data['Course']:
+                # If name is missing but course exists, use course as name
+                if not tournament_data['Name'] and tournament_data['Course']:
+                    tournament_data['Name'] = tournament_data['Course']
                 
                 # Determine category based on tournament name
-                if "Amateur" in tournament_name:
-                    tournament['Category'] = "Amateur"
-                elif "Senior" in tournament_name:
-                    tournament['Category'] = "Seniors"
-                elif "Women" in tournament_name or "Ladies" in tournament_name:
-                    tournament['Category'] = "Women's"
-                elif "Junior" in tournament_name:
-                    tournament['Category'] = "Junior's"
+                name = tournament_data['Name'] or ""
+                if "Amateur" in name:
+                    tournament_data['Category'] = "Amateur"
+                elif "Senior" in name:
+                    tournament_data['Category'] = "Seniors"
+                elif "Women" in name or "Ladies" in name:
+                    tournament_data['Category'] = "Women's"
+                elif "Junior" in name:
+                    tournament_data['Category'] = "Junior's"
                 
-                tournaments.append(tournament)
+                tournaments.append(tournament_data)
             
-            # Continue with next lines
-            continue
-        
-        # If not a date line, just move to next line
-        i += 1
+            # Skip ahead to find the next date
+            while j < len(lines):
+                if re.match(r'^(January|February|March|April|May|June|July|August|September|October|November|December|Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d{1,2}', lines[j].strip()):
+                    i = j
+                    break
+                j += 1
+            
+            if j >= len(lines):
+                break
+        else:
+            i += 1
     
     # Convert to DataFrame
     if tournaments:
@@ -313,7 +223,8 @@ def parse_tabular_format_alternative(text):
                 
         return tournaments_df
     else:
-        # One last attempt
+        # Try alternative parser
+        st.warning("No tournaments found in standard tabular format. Attempting alternative parsing...")
         return parse_tabular_greedy(text)
 
 def parse_tabular_greedy(text):
@@ -324,72 +235,94 @@ def parse_tabular_greedy(text):
     
     # Start parsing
     i = 0
-    while i < len(lines) - 2:  # Need at least 3 lines for a complete entry
+    while i < len(lines):
         line = lines[i].strip()
         
         # Look for date pattern
         date_match = None
         if line:
-            date_match = re.search(r'(January|February|March|April|May|June|July|August|September|October|November|December|Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+(\d{1,2})(?:\-\d{1,2})?', line)
+            date_match = re.search(r'^(January|February|March|April|May|June|July|August|September|October|November|December|Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+(\d{1,2})(?:\-\d{1,2})?', line)
         
         if date_match:
             month, day = date_match.groups()
             current_date = standardize_date(f"{month} {day}", "2025")
             
-            # Look ahead for a tournament name and location within the next 10 lines
-            for j in range(i+1, min(i+10, len(lines))):
+            # Initialize tournament data
+            tournament = {
+                'Date': current_date,
+                'Name': None,
+                'Course': None,
+                'City': None,
+                'State': None,
+                'Zip': None,
+                'Category': "Men's"
+            }
+            
+            # Look ahead for tournament name and location within the next 10 lines
+            name_found = False
+            course_found = False
+            location_found = False
+            j = i + 1
+            
+            while j < min(i + 10, len(lines)) and not (name_found and course_found and location_found):
                 next_line = lines[j].strip()
                 
                 # Skip empty lines and specific markers
-                if not next_line or next_line in ["Leaderboard", "Info", "T", "M", "View leaderboard"]:
+                if not next_line or next_line in ["Leaderboard", "Info", "T", "M", "View leaderboard", "Register"] or \
+                   next_line.startswith("View") or next_line.startswith("Favorite"):
+                    j += 1
                     continue
                 
-                # This might be a tournament name
-                tournament_name = next_line
-                
-                # Look ahead for location information
-                for k in range(j+1, min(j+5, len(lines))):
-                    loc_line = lines[k].strip()
-                    
-                    # Look for city/state pattern
-                    location_match = re.search(r'(.*?)(?:\s+·\s+|\s{2,}|\t+)(.*?),\s+([A-Z]{2})(?:\s|$)', loc_line)
-                    
-                    if location_match:
-                        course, city, state = location_match.groups()
-                        
-                        # Create a tournament entry
-                        tournament = {
-                            'Date': current_date,
-                            'Name': tournament_name.replace("About", "").strip(),
-                            'Course': course.strip(),
-                            'Category': "Men's",  # Default category
-                            'City': city.strip(),
-                            'State': standardize_state(state.strip()),
-                            'Zip': None
-                        }
-                        
-                        # Determine category based on tournament name
-                        if "Amateur" in tournament_name:
-                            tournament['Category'] = "Amateur"
-                        elif "Senior" in tournament_name:
-                            tournament['Category'] = "Seniors"
-                        elif "Women" in tournament_name or "Ladies" in tournament_name:
-                            tournament['Category'] = "Women's"
-                        elif "Junior" in tournament_name:
-                            tournament['Category'] = "Junior's"
-                        
-                        tournaments.append(tournament)
-                        
-                        # Skip ahead to after the location line
-                        i = k
-                        break
-                
-                # If we found a tournament entry, break out of the inner loop
-                if i == k:
+                # Check if this is another date (new tournament)
+                if re.match(r'^(January|February|March|April|May|June|July|August|September|October|November|December|Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d{1,2}', next_line):
                     break
-        
-        # Move to next line
-        i += 1
+                
+                # This might be a tournament name if not already found and it's not a location line
+                if not name_found and not '\t' in next_line and not '  ·  ' in next_line and not ',' in next_line:
+                    tournament['Name'] = re.sub(r'\s+About$', '', next_line)
+                    name_found = True
+                
+                # Look for course name (line with tabs or dot separators)
+                elif not course_found and ('\t' in next_line or '  ·  ' in next_line):
+                    parts = re.split(r'\t+|\s{2,}·\s{2,}|\s{2,}', next_line)
+                    if parts and parts[0].strip():
+                        tournament['Course'] = parts[0].strip()
+                        course_found = True
+                
+                # Look for city/state pattern
+                elif not location_found and ',' in next_line:
+                    location_match = re.search(r'(.*?),\s+([A-Z]{2})(?:\s|$)', next_line)
+                    if location_match:
+                        city, state = location_match.groups()
+                        tournament['City'] = city.strip()
+                        tournament['State'] = standardize_state(state.strip())
+                        location_found = True
+                
+                j += 1
+            
+            # If we have at least name or course, add the tournament
+            if tournament['Name'] or tournament['Course']:
+                # If name is missing but course exists, use course as name
+                if not tournament['Name'] and tournament['Course']:
+                    tournament['Name'] = tournament['Course']
+                
+                # Determine category based on tournament name
+                name = tournament['Name'] or ""
+                if "Amateur" in name:
+                    tournament['Category'] = "Amateur"
+                elif "Senior" in name:
+                    tournament['Category'] = "Seniors"
+                elif "Women" in name or "Ladies" in name:
+                    tournament['Category'] = "Women's"
+                elif "Junior" in name:
+                    tournament['Category'] = "Junior's"
+                
+                tournaments.append(tournament)
+            
+            # Skip ahead to find the next date
+            i = j
+        else:
+            i += 1
     
     # Convert to DataFrame
     if tournaments:
