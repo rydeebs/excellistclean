@@ -6,6 +6,8 @@ from datetime import datetime
 import io
 import requests
 import time
+import logging
+logging.basicConfig(level=logging.INFO)
 
 st.set_page_config(page_title="Golf Tournament Data Parser", layout="wide")
 
@@ -99,43 +101,169 @@ def standardize_zip(zip_str):
     
     return zip_str
 
-def search_golf_course_location(course_name, state_code):
+def search_golf_course_location_mapbox(course_name, state_code, mapbox_token):
     """
-    Search for the location of a golf course using web_search tool.
-    This function will be used in the Streamlit app to find location data.
+    Enhanced Mapbox Geocoding API function to find the location of a golf course.
+    This version focuses on extracting the city more reliably.
     """
-    # In the actual implementation, this would call web_search
-    # For now, we'll add a placeholder function that simulates a search result
-    
-    # Create a progress indicator
-    with st.spinner(f"Looking up location for {course_name}..."):
-        # This is where the actual web search would happen
-        # In a real implementation, you would use Streamlit's built-in functions
-        # or external APIs to perform the search
-        time.sleep(0.5)  # Simulate search delay
+    with st.spinner(f"Searching for location of {course_name}..."):
+        # First check if we can extract location from the course name
+        city = None
+        zip_code = None
         
-        # Example implementation (replace with actual web search function):
-        # In a real implementation, you would analyze search results to extract city/zip
-        
-        # Try to extract location from course name if it contains it
         if ',' in course_name:
             parts = course_name.split(',')
             if len(parts) >= 2:
-                city = parts[1].strip()
-                return (city, state_code, "")
+                potential_city = parts[1].strip()
+                # Check if this looks like a city name
+                if len(potential_city) > 2 and not potential_city.isdigit():
+                    city = potential_city
+                    # Log the extracted city for debugging
+                    st.write(f"Extracted city '{city}' from course name: {course_name}")
         
-        # Extract city from course name if it might be part of the name
-        if " in " in course_name:
-            parts = course_name.split(" in ")
-            if len(parts) == 2:
-                location_part = parts[1].strip()
-                if ',' in location_part:
-                    city = location_part.split(',')[0].strip()
-                    return (city, state_code, "")
-    
-    # Return placeholder for demo purposes
-    # In real implementation, you would return actual search results
-    return ("Location pending search", state_code, "")
+        # If we didn't find city in the name, use Mapbox to geocode
+        if not city:
+            # Add more specificity to the search query
+            query = f"{course_name} golf club {state_code} USA"
+            
+            # URL encode the query
+            query = requests.utils.quote(query)
+            
+            # Build the URL - use 'place' type to prioritize named places
+            url = f"https://api.mapbox.com/geocoding/v5/mapbox.places/{query}.json?access_token={mapbox_token}&country=US&types=poi,place&limit=1"
+            
+            try:
+                # Make the request
+                response = requests.get(url)
+                
+                # Display raw response for debugging
+                st.write(f"Mapbox search for: {course_name}")
+                
+                # Check if the request was successful
+                if response.status_code == 200:
+                    # Parse the response
+                    data = response.json()
+                    
+                    # Debug: Display full response
+                    st.write("Mapbox response received")
+                    
+                    # Check if we got any results
+                    if data.get('features') and len(data['features']) > 0:
+                        # Get the first result
+                        feature = data['features'][0]
+                        
+                        # Get the place name and coordinates
+                        place_name = feature.get('place_name', '')
+                        st.write(f"Place name: {place_name}")
+                        
+                        # Extract city and state from place_name
+                        # Format is typically: "Course Name, City, State Zip, Country"
+                        place_parts = place_name.split(',')
+                        
+                        # Debug: Show parts
+                        st.write(f"Place parts: {place_parts}")
+                        
+                        if len(place_parts) >= 3:
+                            # City should be the second part
+                            city = place_parts[1].strip()
+                            
+                            # State and ZIP should be in the third part
+                            state_zip = place_parts[2].strip()
+                            
+                            # Debug info
+                            st.write(f"Extracted city: {city}")
+                            st.write(f"State/ZIP part: {state_zip}")
+                            
+                            # Extract ZIP code if present
+                            zip_match = re.search(r'\d{5}', state_zip)
+                            if zip_match:
+                                zip_code = zip_match.group(0)
+                                st.write(f"Extracted ZIP: {zip_code}")
+                            
+                            # If we couldn't find a ZIP code but have context data, use that
+                            if not zip_code and 'context' in feature:
+                                for context in feature['context']:
+                                    if context.get('id', '').startswith('postcode'):
+                                        zip_code = context.get('text', '')
+                                        st.write(f"Context ZIP: {zip_code}")
+                                        break
+                        
+                        # If place_parts parsing didn't work, try using the context directly
+                        if not city and 'context' in feature:
+                            # Iterate through context to find place (city)
+                            for context in feature['context']:
+                                if context.get('id', '').startswith('place'):
+                                    city = context.get('text', '')
+                                    st.write(f"Context city: {city}")
+                                    break
+                    else:
+                        st.write("No features found in Mapbox response")
+                else:
+                    st.write(f"Mapbox API error: {response.status_code}")
+                
+                # If Mapbox couldn't find it, try a more generic search without "golf club"
+                if not city:
+                    st.write("Trying simplified search...")
+                    simplified_query = f"{course_name} {state_code}"
+                    simplified_query = requests.utils.quote(simplified_query)
+                    simplified_url = f"https://api.mapbox.com/geocoding/v5/mapbox.places/{simplified_query}.json?access_token={mapbox_token}&country=US&types=place&limit=1"
+                    
+                    try:
+                        response = requests.get(simplified_url)
+                        if response.status_code == 200:
+                            data = response.json()
+                            if data.get('features') and len(data['features']) > 0:
+                                feature = data['features'][0]
+                                place_name = feature.get('place_name', '')
+                                st.write(f"Simplified search result: {place_name}")
+                                
+                                # Extract city directly if this is a "place" type result
+                                if feature.get('place_type') and 'place' in feature.get('place_type'):
+                                    city = feature.get('text', '')
+                                    st.write(f"Direct city result: {city}")
+                                
+                                # If not, try parsing from place_name
+                                if not city and ',' in place_name:
+                                    city = place_name.split(',')[0].strip()
+                                    st.write(f"Parsed city from place: {city}")
+                    except Exception as e:
+                        st.write(f"Error with simplified search: {str(e)}")
+            
+            except Exception as e:
+                st.error(f"Error with Mapbox geocoding: {str(e)}")
+        
+        # If we still don't have a city, try extracting from course name
+        if not city:
+            # Common patterns in course names
+            course_patterns = [
+                # "City Country Club" or "City Golf Club"
+                r'^([A-Za-z\s]+?)(?:\s+Country\s+Club|\s+Golf\s+Club|\s+Golf\s+Course|\s+CC|\s+G\.?C\.?)$',
+                # "The Club at City"
+                r'The\s+(?:Club|Course)\s+at\s+([A-Za-z\s]+)$',
+            ]
+            
+            for pattern in course_patterns:
+                match = re.search(pattern, course_name, re.IGNORECASE)
+                if match:
+                    potential_city = match.group(1).strip()
+                    st.write(f"Extracted potential city from pattern: {potential_city}")
+                    # Check if it's a likely city name (not just "The" or similar)
+                    if len(potential_city) > 3 and potential_city.lower() not in ['the', 'club', 'golf', 'country']:
+                        city = potential_city
+                        st.write(f"Using pattern-extracted city: {city}")
+                        break
+        
+        # Last resort - use default based on state
+        if not city:
+            st.write("Using default city for state")
+            if state_code == 'PA':
+                city = "Pittsburgh"
+            elif state_code == 'FL':
+                city = "Orlando"
+            else:
+                city = "Unknown"
+        
+        return (city, state_code, zip_code)
 
 def parse_tournament_text(text):
     """Parse tournament text and extract structured data."""
@@ -385,8 +513,12 @@ default_state = st.selectbox(
 )
 
 # Search option for course locations
-use_web_search = st.checkbox("Use web search to find golf course locations", value=True, 
-                           help="Enable this to search for course locations on the web.")
+use_mapbox = st.checkbox("Look up golf course locations with Mapbox", value=True, 
+                       help="Enable this to search for course locations using Mapbox Geocoding API.")
+
+# Mapbox access token input
+mapbox_token = st.text_input("Mapbox Access Token:", type="password",
+                           help="Enter your Mapbox access token for geocoding.")
 
 # File naming option
 output_filename = st.text_input("Output Filename (without extension):", "golf_tournaments")
@@ -423,9 +555,10 @@ if st.button("Process Tournament Data"):
                 df.loc[df['State'].isna(), 'State'] = default_state
                 
                 # Look up City and Zip based on Course name and State if enabled
-                if use_web_search:
-                    progress_bar = st.progress(0)
-                    st.write("Looking up golf course locations...")
+                if use_mapbox and mapbox_token:
+                    st.write("#### Geocoding Debug Information")
+                    st.write("Expand this section to see detailed geocoding information")
+                    with st.expander("Geocoding Details"):
                     
                     for idx, row in df.iterrows():
                         progress = int((idx + 1) / len(df) * 100)
@@ -433,7 +566,7 @@ if st.button("Process Tournament Data"):
                         
                         if pd.isna(row['City']) or pd.isna(row['Zip']):
                             if pd.notna(row['Course']) and pd.notna(row['State']):
-                                city, state, zip_code = search_golf_course_location(row['Course'], row['State'])
+                                city, state, zip_code = search_golf_course_location_mapbox(row['Course'], row['State'], mapbox_token)
                                 
                                 # Update only if currently missing
                                 if pd.isna(row['City']):
@@ -442,6 +575,8 @@ if st.button("Process Tournament Data"):
                                     df.at[idx, 'Zip'] = zip_code
                     
                     progress_bar.empty()
+                elif use_mapbox and not mapbox_token:
+                    st.warning("Mapbox location lookup is enabled but no access token was provided. Skipping location lookup.")
             
             # Fill missing data
             df = fill_missing_data(df)
@@ -574,17 +709,22 @@ with st.sidebar:
     1. Paste your tournament text data in the text area
     2. Set the default tournament year
     3. Select the default state for tournaments
-    4. Choose whether to use web search for course locations
+    4. Enter your Mapbox access token if you want to use geocoding
     5. Enter a filename for your output file
     6. Click the "Process Tournament Data" button
     7. Review the extracted information
     8. Fill in any missing data as needed
     9. Download the cleaned data in CSV or Excel format
     
-    ### Web Search Feature:
+    ### Mapbox Geocoding:
     
-    When enabled, the app will search for golf course location information online.
-    This can help automatically fill in City and Zip information based on the course name.
+    When enabled and configured with a valid access token, the app will use Mapbox's geocoding API to look up golf course locations. This helps automatically fill in City and Zip information based on the course name.
+    
+    To get a Mapbox access token:
+    1. Create a free account at mapbox.com
+    2. Navigate to your account page
+    3. Create a new access token
+    4. Paste the token in the input field
     """)
     
     st.header("Required Columns")
