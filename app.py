@@ -557,24 +557,19 @@ if st.button("Process Tournament Data"):
                 # Look up City and Zip based on Course name and State if enabled
                 if use_mapbox and mapbox_token:
                     st.write("#### Geocoding Debug Information")
-                    st.write("Expand this section to see detailed geocoding information")
                     with st.expander("Geocoding Details"):
-                    
-                    for idx, row in df.iterrows():
-                        progress = int((idx + 1) / len(df) * 100)
-                        progress_bar.progress(progress)
-                        
-                        if pd.isna(row['City']) or pd.isna(row['Zip']):
-                            if pd.notna(row['Course']) and pd.notna(row['State']):
-                                city, state, zip_code = search_golf_course_location_mapbox(row['Course'], row['State'], mapbox_token)
-                                
-                                # Update only if currently missing
-                                if pd.isna(row['City']):
-                                    df.at[idx, 'City'] = city
-                                if pd.isna(row['Zip']):
-                                    df.at[idx, 'Zip'] = zip_code
-                    
-                    progress_bar.empty()
+                        progress_bar = st.progress(0)
+                        for idx, row in df.iterrows():
+                            progress = int((idx + 1) / len(df) * 100)
+                            progress_bar.progress(progress)
+                            if pd.isna(row['City']) or pd.isna(row['Zip']):
+                                if pd.notna(row['Course']) and pd.notna(row['State']):
+                                    city, state, zip_code = search_golf_course_location_mapbox(row['Course'], row['State'], mapbox_token)
+                                    if pd.isna(row['City']):
+                                        df.at[idx, 'City'] = city
+                                    if pd.isna(row['Zip']):
+                                        df.at[idx, 'Zip'] = zip_code
+                        progress_bar.empty()
                 elif use_mapbox and not mapbox_token:
                     st.warning("Mapbox location lookup is enabled but no access token was provided. Skipping location lookup.")
             
