@@ -641,7 +641,7 @@ def parse_simple_format(text):
     current_tournament = None
     
     # Define patterns
-    simple_date_pattern = r'^(January|February|March|April|May|June|July|August|September|October|November|December|Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+(\d{1,2})
+    simple_date_pattern = r'^(January|February|March|April|May|June|July|August|September|October|November|December|Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+(\d{1,2})'
     entries_close_pattern = r'^Entries\s+Close:'
     location_pattern = r'(.*?),\s+([A-Za-z\s]+),\s+([A-Za-z]{2})'
     
@@ -758,9 +758,7 @@ def standardize_tournament_names(df):
         
         # If we already have a tournament name, make sure it's clean
         elif not pd.isna(name):
-            name = re.sub(r'\s+\*+[A-Za-z\s\-]*\*+', '', str(name))
-            # Remove "About" suffix if present
-            name = re.sub(r'\s+About, '', name)
+            name = re.sub(r'\s+About$', '', name)
             cleaned_df.at[idx, 'Name'] = name.strip()
     
     # Extract information from course names
