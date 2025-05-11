@@ -20,6 +20,23 @@ def standardize_date(date_str, year="2025"):
     
     date_str = str(date_str).strip()
     
+    # Handle date ranges with full dates like "May 16, 2025 - May 18, 2025"
+    full_date_range_pattern = r'^(January|February|March|April|May|June|July|August|September|October|November|December|Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+(\d{1,2})(?:,\s+(\d{4}))?\s*-\s*(?:January|February|March|April|May|June|July|August|September|October|November|December|Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d{1,2}(?:,\s+\d{4})?'
+    full_range_match = re.match(full_date_range_pattern, date_str, re.IGNORECASE)
+    if full_range_match:
+        month, day, yr = full_range_match.groups()
+        current_year = yr if yr else year
+        # Convert month name to number
+        month_dict = {
+            'January': '01', 'Jan': '01', 'February': '02', 'Feb': '02', 'March': '03', 'Mar': '03',
+            'April': '04', 'Apr': '04', 'May': '05', 'June': '06', 'Jun': '06', 'July': '07', 
+            'Jul': '07', 'August': '08', 'Aug': '08', 'September': '09', 'Sep': '09', 
+            'October': '10', 'Oct': '10', 'November': '11', 'Nov': '11', 'December': '12', 'Dec': '12'
+        }
+        month_num = month_dict.get(month.capitalize(), '01')
+        day_padded = day.zfill(2)
+        return f"{current_year}-{month_num}-{day_padded}"
+    
     # Handle date ranges like "May 16 - 18 2025" (extract the start date: May 16 2025)
     date_range_pattern1 = r'^(January|February|March|April|May|June|July|August|September|October|November|December|Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+(\d{1,2})\s*-\s*\d{1,2}(?:\s+(\d{4}))?$'
     range_match1 = re.match(date_range_pattern1, date_str, re.IGNORECASE)
@@ -54,11 +71,11 @@ def standardize_date(date_str, year="2025"):
         day_padded = day1.zfill(2)
         return f"{current_year}-{month_num}-{day_padded}"
     
-    # Handle cross-year ranges like "October 31 - November 02 2025" (extract start date: October 31 2025)
-    cross_year_range = r'^(January|February|March|April|May|June|July|August|September|October|November|December|Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+(\d{1,2})\s*-\s*(January|February|March|April|May|June|July|August|September|October|November|December|Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d{1,2}(?:\s+(\d{4}))?$'
-    cross_year_match = re.match(cross_year_range, date_str, re.IGNORECASE)
-    if cross_year_match:
-        month1, day1, _, yr = cross_year_match.groups()
+    # Handle single full date like "May 16, 2025"
+    full_date_pattern = r'^(January|February|March|April|May|June|July|August|September|October|November|December|Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+(\d{1,2})(?:,\s+(\d{4}))?$'
+    full_date_match = re.match(full_date_pattern, date_str, re.IGNORECASE)
+    if full_date_match:
+        month, day, yr = full_date_match.groups()
         current_year = yr if yr else year
         # Convert month name to number
         month_dict = {
@@ -67,8 +84,8 @@ def standardize_date(date_str, year="2025"):
             'Jul': '07', 'August': '08', 'Aug': '08', 'September': '09', 'Sep': '09', 
             'October': '10', 'Oct': '10', 'November': '11', 'Nov': '11', 'December': '12', 'Dec': '12'
         }
-        month_num = month_dict.get(month1.capitalize(), '01')
-        day_padded = day1.zfill(2)
+        month_num = month_dict.get(month.capitalize(), '01')
+        day_padded = day.zfill(2)
         return f"{current_year}-{month_num}-{day_padded}"
     
     # Handle month and day only (add year)
