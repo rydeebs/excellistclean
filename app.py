@@ -991,4 +991,3 @@ default_state = st.selectbox(
 
 # File naming option
 output_filename = st.text_input("Output Filename (without extension):", "golf_tournaments")
-
