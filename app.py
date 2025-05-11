@@ -14,11 +14,27 @@ st.write("Paste your tournament text data and we'll parse it into a structured f
 REQUIRED_COLUMNS = ["Date", "Name", "Course", "Category", "City", "State", "Zip"]
 
 def standardize_date(date_str, year="2025"):
-    """Convert various date formats to YYYY-MM-DD format."""
+    """Convert various date formats to YYYY-MM-DD format with support for date ranges."""
     if not date_str:
         return None
     
     date_str = str(date_str).strip()
+    
+    # Handle date ranges (extract the start date)
+    date_range_pattern = r'^(January|February|March|April|May|June|July|August|September|October|November|December|Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+(\d{1,2})\s*-\s*(?:(?:January|February|March|April|May|June|July|August|September|October|November|December|Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+)?(\d{1,2})(?:\s+(\d{4}))?$'
+    range_match = re.match(date_range_pattern, date_str, re.IGNORECASE)
+    if range_match:
+        month, day, _, yr = range_match.groups() if len(range_match.groups()) == 4 else (*range_match.groups(), None)
+        current_year = yr if yr else year
+        return standardize_date(f"{month} {day} {current_year}")
+    
+    # Handle cross-month ranges (May 30 - June 01 2025)
+    cross_month_range = r'^(January|February|March|April|May|June|July|August|September|October|November|December|Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+(\d{1,2})\s*-\s*(January|February|March|April|May|June|July|August|September|October|November|December|Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+(\d{1,2})(?:\s+(\d{4}))?$'
+    cross_match = re.match(cross_month_range, date_str, re.IGNORECASE)
+    if cross_match:
+        month1, day1, _, _, yr = cross_match.groups() if len(cross_match.groups()) == 5 else (*cross_match.groups(), None)
+        current_year = yr if yr else year
+        return standardize_date(f"{month1} {day1} {current_year}")
     
     # Handle month and day only (add year)
     month_day_pattern = r'^(January|February|March|April|May|June|July|August|September|October|November|December|Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[.,\s]+(\d{1,2})$'
@@ -82,6 +98,72 @@ def standardize_state(state_str):
     # If it's a full state name
     return state_dict.get(state_str, state_str)
 
+def parse_list_format(text):
+    """Parse the list format with tournament name, course, location, and date range."""
+    lines = [line.strip() for line in text.split('\n') if line.strip()]
+    
+    tournaments = []
+    current_tournament = None
+    
+    i = 0
+    while i < len(lines):
+        # If we find a line that has a date pattern with ranges
+        date_match = re.search(r'(?:January|February|March|April|May|June|July|August|September|October|November|December|Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d{1,2}\s*-\s*(?:(?:January|February|March|April|May|June|July|August|September|October|November|December|Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+)?\d{1,2}(?:\s+\d{4})?', lines[i])
+        
+        if date_match and i >= 2:  # We need at least 2 previous lines for name and course
+            # We found a date range, this is likely a tournament entry
+            date_str = lines[i]
+            
+            # Work backwards to get tournament details
+            name = lines[i-3] if i >= 3 else ""
+            course = lines[i-2] if i >= 2 else ""
+            location_line = lines[i-1] if i >= 1 else ""
+            
+            # Parse location for city and state
+            location_match = re.search(r'(.*?),\s+([A-Z]{2})(?:\s|$)', location_line)
+            city = location_match.group(1) if location_match else ""
+            state = location_match.group(2) if location_match else ""
+            
+            # Create tournament entry
+            tournament = {
+                'Date': standardize_date(date_str),
+                'Name': name.strip(),
+                'Course': course.strip(),
+                'Category': "Men's",  # Default category
+                'City': city.strip(),
+                'State': standardize_state(state.strip()),
+                'Zip': None
+            }
+            
+            # Determine category based on tournament name
+            if "Amateur" in name:
+                tournament['Category'] = "Amateur"
+            elif "Senior" in name:
+                tournament['Category'] = "Seniors"
+            elif "Women" in name or "Ladies" in name:
+                tournament['Category'] = "Women's"
+            elif "Junior" in name or "Boys'" in name or "Girls'" in name:
+                tournament['Category'] = "Junior's"
+            
+            tournaments.append(tournament)
+        
+        i += 1
+    
+    # Convert to DataFrame
+    if tournaments:
+        tournaments_df = pd.DataFrame(tournaments)
+        
+        # Ensure all required columns exist
+        for col in REQUIRED_COLUMNS:
+            if col not in tournaments_df.columns:
+                tournaments_df[col] = None
+                
+        return tournaments_df
+    else:
+        # Return empty DataFrame with all required columns
+        return pd.DataFrame(columns=REQUIRED_COLUMNS)
+
+# Update the detect_format function to recognize the new list format
 def detect_format(text):
     """Detect which format the text is in."""
     # Split the text into lines and check for patterns
@@ -100,6 +182,15 @@ def detect_format(text):
     if championship_count >= 2:
         return "CHAMPIONSHIP"
     
+    # Check for date ranges in list format
+    date_range_count = 0
+    for line in lines:
+        if re.search(r'(?:January|February|March|April|May|June|July|August|September|October|November|December|Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d{1,2}\s*-\s*(?:(?:January|February|March|April|May|June|July|August|September|October|November|December|Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+)?\d{1,2}(?:\s+\d{4})?', line):
+            date_range_count += 1
+    
+    if date_range_count >= 2:
+        return "LIST_FORMAT"
+    
     # Check for manual input without header (just dates)
     date_count = 0
     for line in lines[:20]:
@@ -112,6 +203,7 @@ def detect_format(text):
     # Otherwise assume it's the simple format (Format 1)
     return "SIMPLE"
 
+# Update the parse_tournament_text function to use the new parser
 def parse_tournament_text(text):
     """Parse tournament text and extract structured data based on detected format."""
     # Detect format
@@ -122,6 +214,8 @@ def parse_tournament_text(text):
         return parse_tabular_format(text)
     elif format_type == "CHAMPIONSHIP":
         return parse_championship_format(text)
+    elif format_type == "LIST_FORMAT":
+        return parse_list_format(text)
     else:
         return parse_simple_format(text)
     
