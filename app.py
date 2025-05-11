@@ -133,6 +133,61 @@ def standardize_state(state_str):
     # If it's a full state name
     return state_dict.get(state_str, state_str)
 
+def detect_format(text):
+    """Detect which format the text is in."""
+    # Split the text into lines and check for patterns
+    lines = [line.strip() for line in text.split('\n') if line.strip()]
+    
+    # Check for list format with tournament info and date ranges
+    if len(lines) >= 4:
+        date_range_count = 0
+        for i in range(3, len(lines), 4):  # Check every 4th line for date patterns
+            if i < len(lines) and re.search(r'(January|February|March|April|May|June|July|August|September|October|November|December|Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d{1,2}\s*-\s*', lines[i]):
+                date_range_count += 1
+                
+        if date_range_count >= 2:
+            return "LIST_FORMAT"
+    
+    # Check for tabular format with Date, Tournaments columns (Format 3)
+    if len(lines) > 0 and ("Date\tTournaments\t" in lines[0] or "Date    Tournaments    " in lines[0]):
+        return "TABULAR"
+    
+    # Check for Championship format (Format 2)
+    championship_count = 0
+    for line in lines[:20]:  # Check first 20 lines
+        if re.search(r'(?:\*\*)?(.*?(?:Championship|Tournament|Cup|Series|Amateur|Open))', line):
+            championship_count += 1
+    
+    if championship_count >= 2:
+        return "CHAMPIONSHIP"
+    
+    # Check for manual input without header (just dates)
+    date_count = 0
+    for line in lines[:20]:
+        if re.match(r'^(January|February|March|April|May|June|July|August|September|October|November|December|Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d{1,2}', line):
+            date_count += 1
+    
+    if date_count >= 2:
+        return "MANUAL_TABULAR"
+    
+    # Otherwise assume it's the simple format (Format 1)
+    return "SIMPLE"
+
+def parse_tournament_text(text):
+    """Parse tournament text and extract structured data based on detected format."""
+    # Detect format
+    format_type = detect_format(text)
+    st.write(f"Detected format: {format_type}")
+    
+    if format_type == "TABULAR" or format_type == "MANUAL_TABULAR":
+        return parse_tabular_format(text)
+    elif format_type == "CHAMPIONSHIP":
+        return parse_championship_format(text)
+    elif format_type == "LIST_FORMAT":
+        return parse_list_format(text)
+    else:
+        return parse_simple_format(text)
+
 def parse_list_format(text):
     """Parse the list format with tournament name, course, location, and date range."""
     lines = [line.strip() for line in text.split('\n') if line.strip()]
@@ -213,130 +268,6 @@ def parse_list_format(text):
     else:
         # Return empty DataFrame with all required columns
         return pd.DataFrame(columns=REQUIRED_COLUMNS)
-
-def detect_format(text):
-    """Detect which format the text is in."""
-    # Split the text into lines and check for patterns
-    lines = [line.strip() for line in text.split('\n') if line.strip()]
-    
-    # Check for list format with tournament info and date ranges
-    if len(lines) >= 4:
-        date_range_count = 0
-        for i in range(3, len(lines), 4):  # Check every 4th line for date patterns
-            if i < len(lines) and re.search(r'(January|February|March|April|May|June|July|August|September|October|November|December|Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d{1,2}\s*-\s*', lines[i]):
-                date_range_count += 1
-                
-        if date_range_count >= 2:
-            return "LIST_FORMAT"
-    
-    # Check for tabular format with Date, Tournaments columns (Format 3)
-    if len(lines) > 0 and ("Date\tTournaments\t" in lines[0] or "Date    Tournaments    " in lines[0]):
-        return "TABULAR"
-    
-    # Check for Championship format (Format 2)
-    championship_count = 0
-    for line in lines[:20]:  # Check first 20 lines
-        if re.search(r'(?:\*\*)?(.*?(?:Championship|Tournament|Cup|Series|Amateur|Open))', line):
-            championship_count += 1
-    
-    if championship_count >= 2:
-        return "CHAMPIONSHIP"
-    
-    # Check for manual input without header (just dates)
-    date_count = 0
-    for line in lines[:20]:
-        if re.match(r'^(January|February|March|April|May|June|July|August|September|October|November|December|Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d{1,2}', line):
-            date_count += 1
-    
-    if date_count >= 2:
-        return "MANUAL_TABULAR"
-    
-    # Otherwise assume it's the simple format (Format 1)
-    return "SIMPLE"
-
-# Update the parse_tournament_text function to use the new parser
-
-def parse_tournament_text(text):
-    """Parse tournament text and extract structured data based on detected format."""
-    # Detect format
-    format_type = detect_format(text)
-    st.write(f"Detected format: {format_type}")
-    
-    if format_type == "TABULAR" or format_type == "MANUAL_TABULAR":
-        return parse_tabular_format(text)
-    elif format_type == "CHAMPIONSHIP":
-        return parse_championship_format(text)
-    elif format_type == "LIST_FORMAT":
-        return parse_list_format(text)
-    else:
-        return parse_simple_format(text)
-
-# Update the main process button code to remove the "Fill Missing Data" section
-
-# Process button
-if st.button("Process Tournament Data"):
-    if tournament_text:
-        try:
-            # Parse the text
-            df = parse_tournament_text(tournament_text)
-            
-            # Display the raw parsed data
-            st.subheader("Parsed Tournament Data")
-            st.write(f"Found {len(df)} tournaments")
-            
-            # Check if DataFrame is empty
-            if df.empty:
-                st.error("No tournaments could be extracted from the text. Please check the format.")
-                # Create an empty DataFrame with all required columns
-                df = pd.DataFrame(columns=REQUIRED_COLUMNS)
-            else:
-                # Ensure all required columns exist
-                for col in REQUIRED_COLUMNS:
-                    if col not in df.columns:
-                        df[col] = None
-            
-            # Standardize names
-            df = standardize_tournament_names(df)
-            
-            # Display parsed data
-            st.dataframe(df)
-            
-            # Create download buttons for the data
-            csv = df.to_csv(index=False)
-            st.download_button(
-                label="Download CSV",
-                data=csv,
-                file_name=f"{output_filename}.csv",
-                mime="text/csv"
-            )
-            
-            # Excel download
-            buffer = io.BytesIO()
-            with pd.ExcelWriter(buffer, engine='xlsxwriter') as writer:
-                df.to_excel(writer, sheet_name='Tournaments', index=False)
-                
-                # Auto-adjust columns' width
-                worksheet = writer.sheets['Tournaments']
-                for i, col in enumerate(df.columns):
-                    max_len = max(df[col].astype(str).apply(len).max(), len(col)) + 2
-                    worksheet.set_column(i, i, max_len)
-            
-            buffer.seek(0)
-            
-            st.download_button(
-                label="Download Excel",
-                data=buffer,
-                file_name=f"{output_filename}.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            )
-            
-        except Exception as e:
-            st.error(f"Error processing text: {str(e)}")
-            # Show traceback for debugging
-            import traceback
-            st.code(traceback.format_exc())
-    else:
-        st.error("Please enter tournament text data.")
     
 def parse_tabular_format(text):
     """Parse tabular format with columns like 'Date', 'Tournaments', etc."""
@@ -612,7 +543,7 @@ def parse_championship_format(text):
     current_tournament = None
     
     # Define patterns
-    championship_pattern = r'^(?:\*\*)?(.*?(?:Championship|Tournament|Cup|Series|Amateur|Open|Four-Ball|Scramble|Father|Son|Parent|Child|Brothers|Foursomes))(?:\s+\*+[A-Za-z\s]*\*+)?(?:\*\*)?'
+    championship_pattern = r'^(?:\*\*)?(.*?(?:Championship|Tournament|Cup|Series|Amateur|Open|Four-Ball|Scramble|Father|Son|Parent|Child|Brothers|Foursomes))(?:\s+\*+[A-Za-z\s]*\*+)?(?:\*\*)?$'
     full_date_pattern = r'(?:\*\*)?(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun),\s+(January|February|March|April|May|June|July|August|September|October|November|December|Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[.,\s]+(\d{1,2})(?:,\s+(\d{4}))?(?:\*\*)?'
     date_range_pattern = r'(?:\*\*)?(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun),\s+[A-Za-z]+\s+\d{1,2}(?:,\s+\d{4})?\s+-\s+(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun),\s+([A-Za-z]+)\s+(\d{1,2})(?:,\s+(\d{4}))?(?:\*\*)?'
     status_pattern = r'(?:\*\*)?(OPEN|CLOSED|INVITATION LIST)(?:\*\*)?'
@@ -710,7 +641,7 @@ def parse_simple_format(text):
     current_tournament = None
     
     # Define patterns
-    simple_date_pattern = r'^(January|February|March|April|May|June|July|August|September|October|November|December|Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+(\d{1,2})'
+    simple_date_pattern = r'^(January|February|March|April|May|June|July|August|September|October|November|December|Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+(\d{1,2})
     entries_close_pattern = r'^Entries\s+Close:'
     location_pattern = r'(.*?),\s+([A-Za-z\s]+),\s+([A-Za-z]{2})'
     
@@ -827,7 +758,9 @@ def standardize_tournament_names(df):
         
         # If we already have a tournament name, make sure it's clean
         elif not pd.isna(name):
-            name = re.sub(r'\s+About$', '', name)
+            name = re.sub(r'\s+\*+[A-Za-z\s\-]*\*+', '', str(name))
+            # Remove "About" suffix if present
+            name = re.sub(r'\s+About, '', name)
             cleaned_df.at[idx, 'Name'] = name.strip()
     
     # Extract information from course names
@@ -860,28 +793,13 @@ def standardize_tournament_names(df):
     
     return cleaned_df
 
-def fill_missing_data(df):
-    """Fill in missing data based on patterns."""
-    # Create copy to avoid modifying the original
-    filled_df = df.copy()
-    
-    # Set default categories if missing
-    if 'Category' in filled_df.columns:
-        filled_df['Category'] = filled_df['Category'].fillna('Men\'s')  # Default to Men's if not specified
-    
-    # Apply default state if provided
-    if 'State' in filled_df.columns and default_state:
-        filled_df.loc[filled_df['State'].isna(), 'State'] = default_state
-    
-    return filled_df
-
 # Main application layout
 st.subheader("Enter Tournament Text Data")
 
 # Example selector
 format_option = st.selectbox(
     "Select an example format:",
-    ["Format 1: Simple List", "Format 2: Championship List", "Format 3: Tabular List", "Manual Input (no header)"]
+    ["Format 1: Simple List", "Format 2: Championship List", "Format 3: Tabular List", "Format 4: List with Date Ranges"]
 )
 
 # Default text examples
@@ -935,27 +853,19 @@ Edmond, OK
 Leaderboard	T		
 View leaderboard"""
 
-format4_example = """Apr 13	
-	
-SilverRock  About
-SilverRock Resort	  ·  	
-La Quinta, CA
-Leaderboard	T		
-View leaderboard
-Apr 13	
-	
-The Boulder City Championship  About
-Boulder City	  ·  	
-Boulder City, NV
-Leaderboard	T		
-View leaderboard
-Apr 14	
-	
-OAK TREE SPRING OPEN
-Oak Tree CC- East	  ·  	
-Edmond, OK
-Leaderboard	T		
-View leaderboard"""
+format4_example = """FUTURE TOURNAMENTS
+Alabama State Senior & Super Senior Amateur Championship
+Musgrove Country Club
+Jasper, AL
+May 16 - 18 2025
+Wilfred Galbraith Invitational
+Anniston Country Club
+Anniston, AL
+May 30 - June 01 2025
+Alabama Women's State Mid-Amateur Championship
+Valley Hill Country Club
+Huntsville, AL
+June 02 - 04 2025"""
 
 # Select the default text based on the chosen format
 if format_option == "Format 1: Simple List":
@@ -991,3 +901,68 @@ default_state = st.selectbox(
 
 # File naming option
 output_filename = st.text_input("Output Filename (without extension):", "golf_tournaments")
+
+# Process button
+if st.button("Process Tournament Data"):
+    if tournament_text:
+        try:
+            # Parse the text
+            df = parse_tournament_text(tournament_text)
+            
+            # Display the raw parsed data
+            st.subheader("Parsed Tournament Data")
+            st.write(f"Found {len(df)} tournaments")
+            
+            # Check if DataFrame is empty
+            if df.empty:
+                st.error("No tournaments could be extracted from the text. Please check the format.")
+                # Create an empty DataFrame with all required columns
+                df = pd.DataFrame(columns=REQUIRED_COLUMNS)
+            else:
+                # Ensure all required columns exist
+                for col in REQUIRED_COLUMNS:
+                    if col not in df.columns:
+                        df[col] = None
+            
+            # Standardize names
+            df = standardize_tournament_names(df)
+            
+            # Display parsed data
+            st.dataframe(df)
+            
+            # Create download buttons for the data
+            csv = df.to_csv(index=False)
+            st.download_button(
+                label="Download CSV",
+                data=csv,
+                file_name=f"{output_filename}.csv",
+                mime="text/csv"
+            )
+            
+            # Excel download
+            buffer = io.BytesIO()
+            with pd.ExcelWriter(buffer, engine='xlsxwriter') as writer:
+                df.to_excel(writer, sheet_name='Tournaments', index=False)
+                
+                # Auto-adjust columns' width
+                worksheet = writer.sheets['Tournaments']
+                for i, col in enumerate(df.columns):
+                    max_len = max(df[col].astype(str).apply(len).max(), len(col)) + 2
+                    worksheet.set_column(i, i, max_len)
+            
+            buffer.seek(0)
+            
+            st.download_button(
+                label="Download Excel",
+                data=buffer,
+                file_name=f"{output_filename}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
+            
+        except Exception as e:
+            st.error(f"Error processing text: {str(e)}")
+            # Show traceback for debugging
+            import traceback
+            st.code(traceback.format_exc())
+    else:
+        st.error("Please enter tournament text data.")
