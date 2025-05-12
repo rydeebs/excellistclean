@@ -97,10 +97,26 @@ def standardize_state(state_str):
     # If it's a full state name
     return state_dict.get(state_str, state_str)
 
+def inspect_dataframe(df):
+    """Debug function to inspect dataframe content at different stages"""
+    st.write(f"DataFrame shape: {df.shape}")
+    st.write(f"DataFrame columns: {df.columns.tolist()}")
+    st.write(f"DataFrame first few rows:")
+    st.write(df.head())
+    # Print the entire dataframe for debugging
+    with st.expander("Show full DataFrame for debugging"):
+        for i, row in df.iterrows():
+            st.write(f"Row {i}: {dict(row)}")
+    return df
+
 def detect_format(text):
     """Detect which format the text is in."""
     # Split the text into lines and check for patterns
     lines = [line.strip() for line in text.split('\n') if line.strip()]
+    
+    # Special format for your data with bullets and markdown formatting
+    if any('**' in line for line in lines) and any('*' in line for line in lines):
+        return "MARKDOWN_FORMAT"
     
     # Look for a pattern of 4-line entries with a date range on the 4th line
     if len(lines) >= 4:
@@ -138,6 +154,89 @@ def detect_format(text):
         return "MANUAL_TABULAR"
     
     return "SIMPLE"
+
+def parse_markdown_format(text):
+    """Parse markdown format with bullet points and bold text."""
+    lines = [line.strip() for line in text.split('\n') if line.strip()]
+    
+    tournaments = []
+    
+    for line in lines:
+        # Skip non-tournament lines
+        if not ('*' in line and '**' in line):
+            continue
+        
+        # Extract tournament name (text in bold)
+        name_match = re.search(r'\*\*(.*?)\*\*', line)
+        if not name_match:
+            continue
+            
+        name = name_match.group(1).strip()
+        
+        # Get text after the name
+        after_name_text = line[line.find(name_match.group(0)) + len(name_match.group(0)):].strip()
+        
+        # Split the text by state code (2 capital letters) to get course+city and date
+        state_match = re.search(r'\b([A-Z]{2})\b', after_name_text)
+        if not state_match:
+            continue
+            
+        state = state_match.group(1)
+        state_pos = after_name_text.find(state)
+        
+        # Extract course and city
+        before_state = after_name_text[:state_pos].strip()
+        last_space = before_state.rfind(' ')
+        
+        if last_space > 0:
+            course = before_state[:last_space].strip()
+            city = before_state[last_space:].strip().rstrip(',')
+        else:
+            course = before_state
+            city = ""
+        
+        # Extract date
+        after_state = after_name_text[state_pos + len(state):].strip()
+        date_text = after_state.split('-')[0].strip()
+        
+        # Process the date
+        date_value = ultra_simple_date_extractor(date_text, year)
+        
+        if date_value:
+            # Create tournament entry
+            tournament = {
+                'Date': date_value,
+                'Name': name.strip(),
+                'Course': course.strip(),
+                'Category': "Men's",  # Default category
+                'City': city.strip(),
+                'State': state.strip(),
+                'Zip': None
+            }
+            
+            # Determine category based on tournament name
+            if "Amateur" in name:
+                tournament['Category'] = "Amateur"
+            elif "Senior" in name:
+                tournament['Category'] = "Seniors"
+            elif "Women" in name or "Ladies" in name:
+                tournament['Category'] = "Women's"
+            elif "Junior" in name or "Boys'" in name or "Girls'" in name:
+                tournament['Category'] = "Junior's"
+            
+            # Add the tournament to our list
+            tournaments.append(tournament)
+    
+    # Convert to DataFrame
+    if tournaments:
+        st.write(f"Debug: Found {len(tournaments)} tournaments in markdown format")
+        for i, t in enumerate(tournaments[:5]):
+            st.write(f"Tournament {i+1}: {t['Name']}, Date: {t['Date']}")
+        
+        tournaments_df = pd.DataFrame(tournaments)
+        return inspect_dataframe(tournaments_df)
+    else:
+        # Return empty DataFrame with all required columns
 
 def parse_list_format(text, year="2025"):
     """
@@ -532,7 +631,9 @@ def parse_tournament_text(text):
     format_type = detect_format(text)
     st.write(f"Detected format: {format_type}")
     
-    if format_type == "LIST_FORMAT":
+    if format_type == "MARKDOWN_FORMAT":
+        return parse_markdown_format(text)
+    elif format_type == "LIST_FORMAT":
         return parse_list_format(text, year)
     elif format_type == "TABULAR" or format_type == "MANUAL_TABULAR":
         return parse_tabular_format(text)
