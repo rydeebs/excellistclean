@@ -109,12 +109,11 @@ def inspect_dataframe(df):
             st.write(f"Row {i}: {dict(row)}")
     return df
 
-# Add this new function to your existing code
 def parse_status_based_format(text):
     """
     Parse tournament format with status indicators and explicit tournament names.
     This format handles patterns like:
-    OPEN/CLOSED
+    OPEN/OPENS/CLOSED
     [optional] closes on
     [optional] DAY, MONTH DATE
     [optional] TIME TIMEZONE
@@ -135,8 +134,9 @@ def parse_status_based_format(text):
     while i < len(lines):
         tournament_data = {col: None for col in REQUIRED_COLUMNS}
         
-        # Check for status line (OPEN, CLOSED, etc.)
-        if i < len(lines) and lines[i] in ["OPEN", "CLOSED", "REGISTRATION OPEN", "SOLD OUT", "INVITATION LIST"]:
+        # Check for status line (OPEN, OPENS, CLOSED, etc.)
+        status_keywords = ["OPEN", "OPENS", "CLOSED", "REGISTRATION OPEN", "SOLD OUT", "INVITATION LIST"]
+        if i < len(lines) and any(lines[i] == keyword for keyword in status_keywords):
             status = lines[i]  # Store status but don't use it as the name
             i += 1
             
@@ -198,8 +198,10 @@ def parse_status_based_format(text):
                         tournament_data['Category'] = "Women's"
                     elif "Junior" in name or "Boys'" in name or "Girls'" in name:
                         tournament_data['Category'] = "Junior's"
-                    elif any(x in name for x in ["Father", "Son", "Parent", "Child", "Mother", "Daughter", "Family"]):
-                        tournament_data['Category'] = "Parent/Child"
+                    elif any(x in name for x in ["Father", "Son", "Parent", "Child", "Mother", "Daughter", "Family", "Mixed", "Stix"]):
+                        tournament_data['Category'] = "Mixed/Couples"
+                    elif "EmpowHER" in name:  # Special case for the EmpowHER Classic
+                        tournament_data['Category'] = "Women's"
                     else:
                         tournament_data['Category'] = "Men's"  # Default category
                 
@@ -209,6 +211,8 @@ def parse_status_based_format(text):
                     
                 # Try to extract state from tournament name
                 state_match = re.search(r'\b([A-Z]{2})\b', name) if name else None
+                state_name_match = re.search(r'(\b(?:Arizona|Alabama|Alaska|Arkansas|California|Colorado|Connecticut|Delaware|Florida|Georgia|Hawaii|Idaho|Illinois|Indiana|Iowa|Kansas|Kentucky|Louisiana|Maine|Maryland|Massachusetts|Michigan|Minnesota|Mississippi|Missouri|Montana|Nebraska|Nevada|New\s+Hampshire|New\s+Jersey|New\s+Mexico|New\s+York|North\s+Carolina|North\s+Dakota|Ohio|Oklahoma|Oregon|Pennsylvania|Rhode\s+Island|South\s+Carolina|South\s+Dakota|Tennessee|Texas|Utah|Vermont|Virginia|Washington|West\s+Virginia|Wisconsin|Wyoming)\b)', name) if name else None
+                
                 if state_match:
                     potential_state = state_match.group(1)
                     # Verify it's a valid state code
@@ -219,6 +223,25 @@ def parse_status_based_format(text):
                                    "SD", "TN", "TX", "UT", "VT", "VA", "WA", "WV", "WI", "WY", "DC"]
                     if potential_state in valid_states:
                         tournament_data['State'] = potential_state
+                elif state_name_match:
+                    # Convert state name to code
+                    state_name = state_name_match.group(1)
+                    state_dict = {
+                        'ALABAMA': 'AL', 'ALASKA': 'AK', 'ARIZONA': 'AZ', 'ARKANSAS': 'AR',
+                        'CALIFORNIA': 'CA', 'COLORADO': 'CO', 'CONNECTICUT': 'CT', 'DELAWARE': 'DE',
+                        'FLORIDA': 'FL', 'GEORGIA': 'GA', 'HAWAII': 'HI', 'IDAHO': 'ID',
+                        'ILLINOIS': 'IL', 'INDIANA': 'IN', 'IOWA': 'IA', 'KANSAS': 'KS',
+                        'KENTUCKY': 'KY', 'LOUISIANA': 'LA', 'MAINE': 'ME', 'MARYLAND': 'MD',
+                        'MASSACHUSETTS': 'MA', 'MICHIGAN': 'MI', 'MINNESOTA': 'MN', 'MISSISSIPPI': 'MS',
+                        'MISSOURI': 'MO', 'MONTANA': 'MT', 'NEBRASKA': 'NE', 'NEVADA': 'NV',
+                        'NEW HAMPSHIRE': 'NH', 'NEW JERSEY': 'NJ', 'NEW MEXICO': 'NM', 'NEW YORK': 'NY',
+                        'NORTH CAROLINA': 'NC', 'NORTH DAKOTA': 'ND', 'OHIO': 'OH', 'OKLAHOMA': 'OK',
+                        'OREGON': 'OR', 'PENNSYLVANIA': 'PA', 'RHODE ISLAND': 'RI', 'SOUTH CAROLINA': 'SC',
+                        'SOUTH DAKOTA': 'SD', 'TENNESSEE': 'TN', 'TEXAS': 'TX', 'UTAH': 'UT',
+                        'VERMONT': 'VT', 'VIRGINIA': 'VA', 'WASHINGTON': 'WA', 'WEST VIRGINIA': 'WV',
+                        'WISCONSIN': 'WI', 'WYOMING': 'WY', 'DISTRICT OF COLUMBIA': 'DC'
+                    }
+                    tournament_data['State'] = state_dict.get(state_name.upper(), None)
                 
                 # Add tournament to the list if it has at least a name
                 if tournament_data['Name']:
@@ -244,19 +267,19 @@ def parse_status_based_format(text):
         # Return empty DataFrame with all required columns
         return pd.DataFrame(columns=REQUIRED_COLUMNS)
 
-# Replace your existing detect_format function with this updated version
+# Also update the detect_format function to recognize "OPENS"
 def detect_format(text):
     """Detect which format the text is in."""
     # Split the text into lines and check for patterns
     lines = [line.strip() for line in text.split('\n') if line.strip()]
     
-    # Check for status-based format (OPEN/CLOSED with View)
-    status_keywords = ["OPEN", "CLOSED", "REGISTRATION OPEN", "SOLD OUT", "INVITATION LIST"]
+    # Check for status-based format (OPEN/OPENS/CLOSED with View)
+    status_keywords = ["OPEN", "OPENS", "CLOSED", "REGISTRATION OPEN", "SOLD OUT", "INVITATION LIST"]
     status_count = 0
     view_count = 0
     
     for line in lines:
-        if line in status_keywords:
+        if any(line == keyword for keyword in status_keywords):
             status_count += 1
         if line == "View" or line == "Register" or line == "Details":
             view_count += 1
@@ -264,6 +287,7 @@ def detect_format(text):
     if status_count >= 2 and view_count >= 2:
         return "STATUS_BASED_FORMAT"
     
+    # The rest of the function remains the same...
     # Special case for custom format
     date_range_count = 0
     for line in lines:
