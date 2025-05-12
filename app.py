@@ -14,74 +14,49 @@ st.write("Paste your tournament text data and we'll parse it into a structured f
 REQUIRED_COLUMNS = ["Date", "Name", "Course", "Category", "City", "State", "Zip"]
 
 def standardize_date(date_str, year="2025"):
-    """Convert various date formats to YYYY-MM-DD format, always using the first date in a range."""
+    """
+    Convert various date formats to YYYY-MM-DD format, always using the first date in a range.
+    This version can handle dates that appear anywhere in the text and supports various formats.
+    """
     if not date_str:
         return None
 
     date_str = str(date_str).strip()
-
-    # Handle full date range: "May 30, 2025 - Jun 01, 2025" or "May 30 - Jun 1, 2025"
-    range_patterns = [
-        # "May 30, 2025 - Jun 1, 2025" or "May 30, 2025 - 1, 2025"
-        r'^(January|February|March|April|May|June|July|August|September|October|November|December|'
-        r'Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+(\d{1,2}),?\s*(\d{4})?\s*-\s*'
-        r'((January|February|March|April|May|June|July|August|September|October|November|December|'
-        r'Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+)?(\d{1,2}),?\s*(\d{4})?$',
-        # "May 30 - Jun 1, 2025"
-        r'^(January|February|March|April|May|June|July|August|September|October|November|December|'
-        r'Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+(\d{1,2})\s*-\s*'
-        r'(January|February|March|April|May|June|July|August|September|October|November|December|'
-        r'Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+(\d{1,2}),?\s*(\d{4})?$',
-        # "May 30 - 31, 2025"
-        r'^(January|February|March|April|May|June|July|August|September|October|November|December|'
-        r'Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+(\d{1,2})\s*-\s*(\d{1,2}),?\s*(\d{4})?$'
-    ]
-    for pat in range_patterns:
-        match = re.match(pat, date_str, re.IGNORECASE)
-        if match:
-            # Always extract the first date
-            month = match.group(1)
-            day = match.group(2)
-            yr = match.group(3)
-            current_year = yr if yr else year
-            month_dict = {
-                'January': '01', 'Jan': '01', 'February': '02', 'Feb': '02', 'March': '03', 'Mar': '03',
-                'April': '04', 'Apr': '04', 'May': '05', 'June': '06', 'Jun': '06', 'July': '07',
-                'Jul': '07', 'August': '08', 'Aug': '08', 'September': '09', 'Sep': '09',
-                'October': '10', 'Oct': '10', 'November': '11', 'Nov': '11', 'December': '12', 'Dec': '12'
-            }
-            month_num = month_dict.get(month.capitalize(), '01')
-            day_padded = day.zfill(2)
-            return f"{current_year}-{month_num}-{day_padded}"
-
-    # Handle single full date like "June 1, 2025"
-    full_date_pattern = r'^(January|February|March|April|May|June|July|August|September|October|November|December|Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+(\d{1,2})(?:,\s+(\d{4}))?$'
-    match = re.match(full_date_pattern, date_str, re.IGNORECASE)
+    
+    # Use a more flexible pattern that can find dates anywhere in the text
+    # This will find Month Day, Year (with or without commas) and ignore anything after a dash
+    pattern = r'\b(January|February|March|April|May|June|July|August|September|October|November|December|Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[,\s]+(\d{1,2})(?:[,\s]+(\d{4}))?(?:\s*-\s*)?'
+    
+    match = re.search(pattern, date_str, re.IGNORECASE)
     if match:
         month, day, yr = match.groups()
         current_year = yr if yr else year
+        
+        # Convert month name to number
         month_dict = {
             'January': '01', 'Jan': '01', 'February': '02', 'Feb': '02', 'March': '03', 'Mar': '03',
-            'April': '04', 'Apr': '04', 'May': '05', 'June': '06', 'Jun': '06', 'July': '07',
-            'Jul': '07', 'August': '08', 'Aug': '08', 'September': '09', 'Sep': '09',
+            'April': '04', 'Apr': '04', 'May': '05', 'June': '06', 'Jun': '06', 'July': '07', 
+            'Jul': '07', 'August': '08', 'Aug': '08', 'September': '09', 'Sep': '09', 
             'October': '10', 'Oct': '10', 'November': '11', 'Nov': '11', 'December': '12', 'Dec': '12'
         }
         month_num = month_dict.get(month.capitalize(), '01')
         day_padded = day.zfill(2)
         return f"{current_year}-{month_num}-{day_padded}"
-
-    # Try different date formats
+    
+    # Try different date formats as a fallback
     date_formats = [
         '%m/%d/%Y', '%m-%d-%Y', '%Y-%m-%d', '%Y/%m/%d',
         '%m/%d/%y', '%m-%d-%y', '%d/%m/%Y', '%d-%m-%Y',
         '%B %d, %Y', '%b %d, %Y'
     ]
+    
     for fmt in date_formats:
         try:
             return datetime.strptime(date_str, fmt).strftime('%Y-%m-%d')
         except ValueError:
             continue
-
+    
+    # If nothing else works, return original
     return date_str
 
 def standardize_state(state_str):
