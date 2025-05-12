@@ -172,10 +172,88 @@ def parse_tournament_text(text):
     else:
         return parse_simple_format(text)
 
+def extract_first_date(date_text, default_year="2025"):
+    """
+    Extract the first date from a date range string using a direct approach.
+    Returns a standardized date in YYYY-MM-DD format.
+    """
+    if not date_text:
+        return None
+    
+    # First, split by "-" to get the first part of any range
+    first_part = date_text.split('-')[0].strip()
+    
+    # Define month names and their numeric values
+    month_names = {
+        "January": "01", "Jan": "01", 
+        "February": "02", "Feb": "02", 
+        "March": "03", "Mar": "03",
+        "April": "04", "Apr": "04", 
+        "May": "05", 
+        "June": "06", "Jun": "06", 
+        "July": "07", "Jul": "07",
+        "August": "08", "Aug": "08", 
+        "September": "09", "Sep": "09", 
+        "October": "10", "Oct": "10", 
+        "November": "11", "Nov": "11", 
+        "December": "12", "Dec": "12"
+    }
+    
+    # Find which month is in the text
+    found_month = None
+    for month_name in month_names:
+        if month_name in first_part:
+            found_month = month_name
+            break
+    
+    if found_month:
+        # Find day (number after month)
+        parts = first_part.split(found_month)[1].strip().split()
+        if parts:
+            # The day could be followed by a comma
+            day_str = parts[0].strip(',')
+            if day_str.isdigit():
+                day = day_str.zfill(2)  # Pad with leading zero if needed
+                
+                # Find year (might be in parts or use default)
+                year = default_year
+                for part in parts:
+                    if part.strip(',').isdigit() and len(part.strip(',')) == 4:
+                        year = part.strip(',')
+                        break
+                
+                # Return formatted date
+                return f"{year}-{month_names[found_month]}-{day}"
+    
+    # If direct extraction failed, try to find year, month, day separately
+    try:
+        year_match = re.search(r'\b(\d{4})\b', date_text)
+        year = year_match.group(1) if year_match else default_year
+        
+        # Look for any month name
+        month_match = None
+        month_value = "01"  # Default to January
+        for month_name, month_num in month_names.items():
+            if month_name in date_text:
+                month_match = month_name
+                month_value = month_num
+                break
+        
+        if month_match:
+            # Look for a day number near the month
+            day_match = re.search(r'\b' + re.escape(month_match) + r'\s+(\d{1,2})\b', date_text)
+            if day_match:
+                day = day_match.group(1).zfill(2)
+                return f"{year}-{month_value}-{day}"
+    except:
+        pass
+    
+    return None
+
 def parse_list_format(text):
     """
     Parse the list format with tournament name, course, location, and date range.
-    This fixed version ensures dates are correctly extracted and processed.
+    Uses simple direct date extraction rather than complex regex.
     """
     lines = [line.strip() for line in text.split('\n') if line.strip()]
     
@@ -190,8 +268,11 @@ def parse_list_format(text):
         # Assume pattern: Tournament Name, Course, Location, Date Range
         tournament_name = lines[i]
         
-        # Skip to next entry if this line looks like a date
-        if re.match(r'^(January|February|March|April|May|June|July|August|September|October|November|December|Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)', tournament_name):
+        # Basic check to skip lines that look like they might be dates
+        if any(month in tournament_name for month in ["January", "February", "March", "April", "May", "June", 
+                                                     "July", "August", "September", "October", "November", "December",
+                                                     "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", 
+                                                     "Oct", "Nov", "Dec"]):
             i += 1
             continue
             
@@ -205,39 +286,42 @@ def parse_list_format(text):
             city = location_match.group(1) if location_match else ""
             state = location_match.group(2) if location_match else ""
             
-            # Check for ANY date pattern in the date line, not just at the beginning
-            date_pattern = r'(January|February|March|April|May|June|July|August|September|October|November|December|Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d{1,2}'
-            date_match = re.search(date_pattern, date_line, re.IGNORECASE)
+            # Check if the date line has any month name in it
+            has_month = any(month in date_line for month in ["January", "February", "March", "April", "May", "June", 
+                                                            "July", "August", "September", "October", "November", "December",
+                                                            "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", 
+                                                            "Oct", "Nov", "Dec"])
             
-            # If date found, create tournament entry
-            if date_match:
-                # Process the date here
-                date_value = standardize_date(date_line)
+            if has_month:
+                # Extract the date using our direct method
+                date_value = extract_first_date(date_line)
                 
-                # Create tournament entry with the extracted date
-                tournament = {
-                    'Date': date_value, 
-                    'Name': tournament_name.strip(),
-                    'Course': course_name.strip(),
-                    'Category': "Men's",  # Default category
-                    'City': city.strip(),
-                    'State': standardize_state(state.strip()),
-                    'Zip': None
-                }
-                
-                # Determine category based on tournament name
-                name = tournament_name
-                if "Amateur" in name:
-                    tournament['Category'] = "Amateur"
-                elif "Senior" in name:
-                    tournament['Category'] = "Seniors"
-                elif "Women" in name or "Ladies" in name:
-                    tournament['Category'] = "Women's"
-                elif "Junior" in name or "Boys'" in name or "Girls'" in name:
-                    tournament['Category'] = "Junior's"
-                
-                # Add the tournament to our list
-                tournaments.append(tournament)
+                # Only proceed if we successfully extracted a date
+                if date_value:
+                    # Create tournament entry
+                    tournament = {
+                        'Date': date_value,
+                        'Name': tournament_name.strip(),
+                        'Course': course_name.strip(),
+                        'Category': "Men's",  # Default category
+                        'City': city.strip(),
+                        'State': standardize_state(state.strip()),
+                        'Zip': None
+                    }
+                    
+                    # Determine category based on tournament name
+                    name = tournament_name
+                    if "Amateur" in name:
+                        tournament['Category'] = "Amateur"
+                    elif "Senior" in name:
+                        tournament['Category'] = "Seniors"
+                    elif "Women" in name or "Ladies" in name:
+                        tournament['Category'] = "Women's"
+                    elif "Junior" in name or "Boys'" in name or "Girls'" in name:
+                        tournament['Category'] = "Junior's"
+                    
+                    # Add the tournament to our list
+                    tournaments.append(tournament)
                 
                 # Move to next entry (skip the 4 lines we just processed)
                 i += 4
