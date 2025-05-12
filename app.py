@@ -97,6 +97,52 @@ def standardize_state(state_str):
     # If it's a full state name
     return state_dict.get(state_str, state_str)
 
+def determine_gender(tournament_name):
+    """
+    Determine gender from tournament name by looking for specific keywords.
+    Returns "Women's" or "Men's" based on analysis.
+    """
+    # Keywords that indicate women's tournaments
+    women_keywords = ["Women", "Women's", "Ladies", "Ladies'", "Girls", "Girls'", "EmpowHER"]
+    
+    # Keywords that indicate men's tournaments
+    men_keywords = ["Men", "Men's", "Boys", "Boys'"]
+    
+    # Check for women's indicators first
+    for keyword in women_keywords:
+        if keyword in tournament_name:
+            return "Women's"
+    
+    # Then check for men's indicators
+    for keyword in men_keywords:
+        if keyword in tournament_name:
+            return "Men's"
+    
+    # Default to Men's if no gender is specified
+    # (this is common in golf where unmarked tournaments are typically men's events)
+    return "Men's"
+
+def update_tournament_with_gender_and_type(tournament_data):
+    """
+    Helper function to add Gender and Type to existing tournament data.
+    Can be called from other parsers to standardize this functionality.
+    """
+    name = tournament_data.get('Name', '')
+    
+    # Set Gender
+    tournament_data['Gender'] = determine_gender(name)
+    
+    # Set Type if not already set
+    if 'Type' not in tournament_data or not tournament_data['Type']:
+        if "Championship" in name:
+            tournament_data['Type'] = "Championship"
+        elif "Qualifier" in name:
+            tournament_data['Type'] = "Qualifier"
+        else:
+            tournament_data['Type'] = "Tournament"
+            
+    return tournament_data
+
 def inspect_dataframe(df):
     """Debug function to inspect dataframe content at different stages"""
     st.write(f"DataFrame shape: {df.shape}")
@@ -267,27 +313,135 @@ def parse_status_based_format(text):
         # Return empty DataFrame with all required columns
         return pd.DataFrame(columns=REQUIRED_COLUMNS)
 
-# Also update the detect_format function to recognize "OPENS"
+def parse_usga_qualifier_format(text):
+    """
+    Parse USGA qualifier format without status indicators.
+    This format handles patterns like:
+    Tournament Name
+    View
+    Date
+    Course
+    """
+    # Split the text into lines and remove empty lines
+    lines = [line.strip() for line in text.split('\n') if line.strip()]
+    
+    tournaments = []
+    i = 0
+    
+    while i < len(lines):
+        # Look for tournament name followed by "View"
+        if i < len(lines) and i+1 < len(lines) and lines[i+1] == "View":
+            tournament_data = {col: None for col in REQUIRED_COLUMNS}
+            
+            # This is a tournament name
+            tournament_data['Name'] = lines[i].strip()
+            i += 2  # Skip "View" line
+            
+            # Next line should be date
+            if i < len(lines):
+                date_line = lines[i]
+                tournament_data['Date'] = ultra_simple_date_extractor(date_line, year)
+                i += 1
+            
+            # Next line should be course
+            if i < len(lines):
+                tournament_data['Course'] = lines[i].strip()
+                i += 1
+            
+            # Set default category based on tournament name
+            name = tournament_data['Name']
+            if name:
+                if "Women's" in name or "Ladies" in name or "Girls'" in name:
+                    tournament_data['Category'] = "Women's"
+                elif "Junior" in name or "Boys'" in name:
+                    tournament_data['Category'] = "Junior's"
+                elif "Senior" in name:
+                    tournament_data['Category'] = "Seniors"
+                elif "Mid-Amateur" in name:
+                    tournament_data['Category'] = "Mid-Amateur"
+                elif "Amateur" in name:
+                    tournament_data['Category'] = "Amateur"
+                elif "Four-Ball" in name:
+                    tournament_data['Category'] = "Four-Ball"
+                else:
+                    tournament_data['Category'] = "Men's"  # Default category
+            
+            # Extract qualifier type
+            qualifier_match = re.search(r'(Qualifier|Final Qualifier|Local Qualifier)', name) if name else None
+            if qualifier_match:
+                tournament_data['Type'] = qualifier_match.group(1)
+            else:
+                tournament_data['Type'] = "Tournament"
+            
+            # Set default state if provided
+            if default_state:
+                tournament_data['State'] = default_state
+            
+            # Try to extract state from course name or tournament name
+            course = tournament_data['Course']
+            name = tournament_data['Name']
+            
+            # Look for state code in tournament name
+            state_match = re.search(r' - ([A-Za-z\s]+)$', name) if name else None
+            if state_match:
+                location = state_match.group(1).strip()
+                # Check if this is a known course or city in a state
+                # For now, we just use the default state
+            
+            # Add tournament to the list
+            if tournament_data['Name'] and tournament_data['Date']:
+                tournaments.append(tournament_data)
+        else:
+            i += 1
+    
+    # Convert to DataFrame
+    if tournaments:
+        tournaments_df = pd.DataFrame(tournaments)
+        
+        # Ensure all required columns exist
+        for col in REQUIRED_COLUMNS:
+            if col not in tournaments_df.columns:
+                tournaments_df[col] = None
+                
+        return tournaments_df
+    else:
+        # Return empty DataFrame with all required columns
+        return pd.DataFrame(columns=REQUIRED_COLUMNS)
+
+# Update the detect_format function to recognize USGA qualifier format
 def detect_format(text):
     """Detect which format the text is in."""
     # Split the text into lines and check for patterns
     lines = [line.strip() for line in text.split('\n') if line.strip()]
     
+    # Check for USGA qualifier format
+    view_count = 0
+    qualifier_count = 0
+    
+    for i in range(len(lines)):
+        if lines[i] == "View":
+            view_count += 1
+        if i > 0 and "Qualifier" in lines[i-1]:
+            qualifier_count += 1
+    
+    # If many "View" lines and some qualifier references, it's likely the USGA format
+    if view_count >= 3 and (qualifier_count >= 1 or "U.S." in text):
+        return "USGA_QUALIFIER_FORMAT"
+    
     # Check for status-based format (OPEN/OPENS/CLOSED with View)
     status_keywords = ["OPEN", "OPENS", "CLOSED", "REGISTRATION OPEN", "SOLD OUT", "INVITATION LIST"]
     status_count = 0
-    view_count = 0
+    action_count = 0
     
     for line in lines:
         if any(line == keyword for keyword in status_keywords):
             status_count += 1
         if line == "View" or line == "Register" or line == "Details":
-            view_count += 1
+            action_count += 1
     
-    if status_count >= 2 and view_count >= 2:
+    if status_count >= 2 and action_count >= 2:
         return "STATUS_BASED_FORMAT"
     
-    # The rest of the function remains the same...
     # Special case for custom format
     date_range_count = 0
     for line in lines:
@@ -888,7 +1042,9 @@ def parse_tournament_text(text):
     format_type = detect_format(text)
     st.write(f"Detected format: {format_type}")
     
-    if format_type == "STATUS_BASED_FORMAT":
+    if format_type == "USGA_QUALIFIER_FORMAT":
+        return parse_usga_qualifier_format(text)
+    elif format_type == "STATUS_BASED_FORMAT":
         return parse_status_based_format(text)
     elif format_type == "CUSTOM_FORMAT":
         return parse_custom_format(text)
