@@ -421,6 +421,105 @@ def parse_usga_qualifier_format(text):
     else:
         # Return empty DataFrame with all required columns
         return pd.DataFrame(columns=REQUIRED_COLUMNS)
+    
+def parse_usga_qualifier_expanded_format(text):
+    """
+    Parse expanded USGA qualifier format with tournament name, date, course and golfers.
+    This handles the pattern:
+    Tournament Name
+    Date Line (like Mon, Jun 2, 2025)
+    Course: <Course Name>
+    Golfers: <Count>
+    View
+    """
+    # Split the text into lines and remove empty lines
+    lines = [line.strip() for line in text.split('\n') if line.strip()]
+    
+    tournaments = []
+    i = 0
+    
+    while i < len(lines):
+        # Look for tournament name followed by date line with day of week
+        if (i < len(lines) and 
+            i+1 < len(lines) and 
+            i+2 < len(lines) and 
+            re.match(r'^(Mon|Tue|Wed|Thu|Fri|Sat|Sun),\s+[A-Za-z]{3}\s+\d{1,2},\s+\d{4}$', lines[i+1])):
+            
+            tournament_data = {col: None for col in REQUIRED_COLUMNS}
+            
+            # This is a tournament name
+            tournament_data['Name'] = lines[i].strip()
+            
+            # Next line is date
+            date_line = lines[i+1]
+            tournament_data['Date'] = ultra_simple_date_extractor(date_line, year)
+            
+            # Look for course information
+            course_line_idx = -1
+            for j in range(i+2, min(i+5, len(lines))):
+                if lines[j].startswith("Course:"):
+                    course_line_idx = j
+                    course_name = lines[j][len("Course:"):].strip()
+                    tournament_data['Course'] = course_name
+                    break
+            
+            # Set default category and gender based on tournament name
+            name = tournament_data['Name']
+            if name:
+                # Category
+                if "Amateur" in name and "Four-Ball" not in name:
+                    tournament_data['Category'] = "Amateur"
+                elif "Senior" in name:
+                    tournament_data['Category'] = "Seniors"
+                elif "Women" in name or "Ladies" in name or "Girls'" in name:
+                    tournament_data['Category'] = "Women's"
+                elif "Junior" in name or "Boys'" in name:
+                    tournament_data['Category'] = "Junior's"
+                elif "Mid-Amateur" in name:
+                    tournament_data['Category'] = "Mid-Amateur"
+                elif "Four-Ball" in name:
+                    tournament_data['Category'] = "Four-Ball"
+                else:
+                    tournament_data['Category'] = "Men's"  # Default category
+                
+                # Gender
+                tournament_data['Gender'] = determine_gender(name)
+            
+            # Set default state if provided
+            if default_state:
+                tournament_data['State'] = default_state
+            
+            # Skip ahead to after the View line or end of this entry
+            view_line_idx = -1
+            for j in range(i+2, min(i+7, len(lines))):
+                if lines[j] == "View":
+                    view_line_idx = j
+                    i = j + 1  # Set i to after the View line
+                    break
+            
+            # If we didn't find a View line, just skip ahead a reasonable amount
+            if view_line_idx == -1:
+                i += 5
+            
+            # Add tournament to the list if we have essential data
+            if tournament_data['Name'] and tournament_data['Date']:
+                tournaments.append(tournament_data)
+        else:
+            i += 1
+    
+    # Convert to DataFrame
+    if tournaments:
+        tournaments_df = pd.DataFrame(tournaments)
+        
+        # Ensure all required columns exist
+        for col in REQUIRED_COLUMNS:
+            if col not in tournaments_df.columns:
+                tournaments_df[col] = None
+                
+        return tournaments_df
+    else:
+        # Return empty DataFrame with all required columns
+        return pd.DataFrame(columns=REQUIRED_COLUMNS)
 
 # Update the detect_format function to recognize USGA qualifier format
 def detect_format(text):
@@ -428,10 +527,28 @@ def detect_format(text):
     # Split the text into lines and check for patterns
     lines = [line.strip() for line in text.split('\n') if line.strip()]
     
-    # Check for USGA qualifier format
+    # Check for expanded USGA qualifier format with "Course:" and "Golfers:" lines
+    course_prefix_count = 0
+    golfers_prefix_count = 0
+    date_with_year_count = 0
     view_count = 0
-    qualifier_count = 0
     
+    for i in range(len(lines)):
+        if lines[i].startswith("Course:"):
+            course_prefix_count += 1
+        if lines[i].startswith("Golfers:"):
+            golfers_prefix_count += 1
+        if i < len(lines) - 1 and re.match(r'^(Mon|Tue|Wed|Thu|Fri|Sat|Sun),\s+[A-Za-z]{3}\s+\d{1,2},\s+\d{4}$', lines[i]):
+            date_with_year_count += 1
+        if lines[i] == "View":
+            view_count += 1
+    
+    # If we have several "Course:" lines and date lines with year, it's likely the expanded USGA format
+    if course_prefix_count >= 2 and date_with_year_count >= 2:
+        return "USGA_QUALIFIER_EXPANDED_FORMAT"
+    
+    # Check for USGA qualifier format (standard)
+    qualifier_count = 0
     for i in range(len(lines)):
         if lines[i] == "View":
             view_count += 1
@@ -579,7 +696,7 @@ def parse_markdown_format(text):
             # Add the tournament to our list
             tournaments.append(tournament)
         
-        # Convert to DataFrame
+    # Convert to DataFrame
     if tournaments:
         st.write(f"Debug: Found {len(tournaments)} tournaments in markdown format")
         for i, t in enumerate(tournaments[:5]):
@@ -590,7 +707,7 @@ def parse_markdown_format(text):
     else:
         # Return empty DataFrame with all required columns
         return pd.DataFrame(columns=REQUIRED_COLUMNS)
-    
+
 def parse_custom_format(text):
     """Custom parser for the specific format observed in the data."""
     lines = [line.strip() for line in text.split('\n') if line.strip()]
@@ -749,7 +866,7 @@ def parse_list_format(text, year="2025"):
     else:
         # Return empty DataFrame with all required columns
         return pd.DataFrame(columns=REQUIRED_COLUMNS)
-
+    
 def parse_tabular_format(text):
     """Parse tabular format with columns like 'Date', 'Tournaments', etc."""
     lines = [line for line in text.split('\n')]
@@ -1057,7 +1174,9 @@ def parse_tournament_text(text):
     format_type = detect_format(text)
     st.write(f"Detected format: {format_type}")
     
-    if format_type == "USGA_QUALIFIER_FORMAT":
+    if format_type == "USGA_QUALIFIER_EXPANDED_FORMAT":
+        return parse_usga_qualifier_expanded_format(text)
+    elif format_type == "USGA_QUALIFIER_FORMAT":
         return parse_usga_qualifier_format(text)
     elif format_type == "STATUS_BASED_FORMAT":
         return parse_status_based_format(text)
@@ -1077,7 +1196,8 @@ def parse_tournament_text(text):
 # Example selector
 format_option = st.selectbox(
     "Select an example format:",
-    ["Format 1: Simple List", "Format 2: Championship List", "Format 3: Tabular List", "Format 4: List with Date Ranges"]
+    ["Format 1: Simple List", "Format 2: Championship List", "Format 3: Tabular List", 
+     "Format 4: List with Date Ranges", "Format 5: USGA Qualifier Format"]
 )
 
 # Default text examples
@@ -1157,6 +1277,37 @@ Azalea City Golf Course
 Mobile, AL
 June 07 - 08 2025"""
 
+format5_example = """2025 U.S. Senior Open Final Qualifier - Mesa CC
+Mon, Jun 2, 2025
+Course: Mesa Country Club
+Golfers: 0
+View
+2025 U.S. Girls' Junior Amateur Qualifier - Alta Mesa
+Mon, Jun 9, 2025
+Course: Alta Mesa Golf Club
+Golfers: 0
+View
+2025 U.S. Junior Amateur Qualifier - Tatum Ranch
+Mon, Jun 9, 2025
+Course: Tatum Ranch Golf Club
+Golfers: 0
+View
+2025 U.S. Senior Women's Open Qualifier - Terravita
+Mon, Jun 23, 2025
+Course: Terravita Golf Club
+Golfers: 0
+View
+2025 U.S. Amateur Local Qualifier - Sterling Grove
+Mon, Jun 30, 2025
+Course: Sterling Grove Golf & Country Club
+Golfers: 0
+View
+2025 U.S. Women's Amateur Qualifier - Moon Valley
+Thu, Jul 10, 2025
+Course: Moon Valley Country Club
+Golfers: 0
+View"""
+
 # Select the default text based on the chosen format
 if format_option == "Format 1: Simple List":
     default_text = format1_example
@@ -1164,6 +1315,8 @@ elif format_option == "Format 2: Championship List":
     default_text = format2_example
 elif format_option == "Format 3: Tabular List":
     default_text = format3_example
+elif format_option == "Format 5: USGA Qualifier Format":
+    default_text = format5_example
 else:
     default_text = format4_example
 
