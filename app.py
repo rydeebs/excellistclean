@@ -311,6 +311,9 @@ def parse_list_format(text, year="2025"):
     tournaments = []
     i = 0
     
+    # Debug: Show total number of lines
+    st.write(f"Total lines to process: {len(lines)}")
+    
     # Skip header line if it exists (e.g., "FUTURE TOURNAMENTS")
     if i < len(lines) and ("TOURNAMENT" in lines[i].upper() or "FUTURE" in lines[i].upper()):
         i += 1
@@ -322,6 +325,13 @@ def parse_list_format(text, year="2025"):
         course_name = lines[i+1]
         location_line = lines[i+2]
         date_line = lines[i+3]
+        
+        # Debug: Show current processing
+        st.write(f"Processing entry {i//4 + 1}:")
+        st.write(f"Name: {tournament_name}")
+        st.write(f"Course: {course_name}")
+        st.write(f"Location: {location_line}")
+        st.write(f"Date: {date_line}")
         
         # Skip to next line if this line seems to be a date (probably not a name)
         month_names = ["January", "February", "March", "April", "May", "June", "July", "August", 
@@ -366,9 +376,13 @@ def parse_list_format(text, year="2025"):
             
             # Add the tournament to our list
             tournaments.append(tournament)
+            st.write(f"Added tournament: {tournament_name}")  # Debug log
         
         # Always move forward by 4 lines after processing a group
         i += 4
+    
+    # Debug: Show total tournaments found
+    st.write(f"Total tournaments found: {len(tournaments)}")
     
     # Convert to DataFrame
     if tournaments:
