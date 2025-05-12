@@ -114,6 +114,16 @@ def detect_format(text):
     # Split the text into lines and check for patterns
     lines = [line.strip() for line in text.split('\n') if line.strip()]
     
+    # Special case for custom format
+    date_range_count = 0
+    for line in lines:
+        if " - " in line and any(month in line for month in ["Jan", "Feb", "Mar", "Apr", "May", "Jun", 
+                                                        "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]):
+            date_range_count += 1
+    
+    if date_range_count >= 3:
+        return "CUSTOM_FORMAT"
+        
     # Special format for your data with bullets and markdown formatting
     if any('**' in line for line in lines) and any('*' in line for line in lines):
         return "MARKDOWN_FORMAT"
@@ -235,6 +245,78 @@ def parse_markdown_format(text):
         
         tournaments_df = pd.DataFrame(tournaments)
         return inspect_dataframe(tournaments_df)
+    else:
+        # Return empty DataFrame with all required columns
+        return pd.DataFrame(columns=REQUIRED_COLUMNS)
+    
+def parse_custom_format(text):
+    """Custom parser for the specific format observed in the data."""
+    lines = [line.strip() for line in text.split('\n') if line.strip()]
+    
+    tournaments = []
+    
+    # This parser looks for date lines and then works backwards
+    for i in range(len(lines)):
+        line = lines[i]
+        
+        # Identify date range lines
+        if " - " in line and any(month in line for month in ["Jan", "Feb", "Mar", "Apr", "May", "Jun", 
+                                                        "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]):
+            # We found a date line, now go back to find tournament details
+            if i >= 3:  # Need at least 3 lines before this (name, course, location)
+                name = lines[i-3]
+                course = lines[i-2]
+                location = lines[i-1]
+                date_range = line
+                
+                # Parse location for city and state
+                location_match = re.search(r'(.*?),\s+([A-Z]{2})', location)
+                city = ""
+                state = ""
+                if location_match:
+                    city = location_match.group(1).strip()
+                    state = location_match.group(2).strip()
+                
+                # Extract first date
+                first_date = ultra_simple_date_extractor(date_range.split(" - ")[0], year)
+                
+                if first_date:
+                    # Create tournament entry
+                    tournament = {
+                        'Date': first_date,
+                        'Name': name.strip(),
+                        'Course': course.strip(),
+                        'Category': "Men's",  # Default category
+                        'City': city,
+                        'State': state,
+                        'Zip': None
+                    }
+                    
+                    # Determine category based on tournament name
+                    if "Amateur" in name:
+                        tournament['Category'] = "Amateur"
+                    elif "Senior" in name:
+                        tournament['Category'] = "Seniors"
+                    elif "Women" in name or "Ladies" in name:
+                        tournament['Category'] = "Women's"
+                    elif "Junior" in name or "Boys'" in name or "Girls'" in name:
+                        tournament['Category'] = "Junior's"
+                    
+                    # Add the tournament to our list
+                    tournaments.append(tournament)
+    
+    # Convert to DataFrame
+    if tournaments:
+        st.write(f"Debug: Found {len(tournaments)} tournaments in custom format")
+        
+        tournaments_df = pd.DataFrame(tournaments)
+        
+        # Ensure all required columns exist
+        for col in REQUIRED_COLUMNS:
+            if col not in tournaments_df.columns:
+                tournaments_df[col] = None
+                
+        return tournaments_df
     else:
         # Return empty DataFrame with all required columns
         return pd.DataFrame(columns=REQUIRED_COLUMNS)
@@ -632,7 +714,9 @@ def parse_tournament_text(text):
     format_type = detect_format(text)
     st.write(f"Detected format: {format_type}")
     
-    if format_type == "MARKDOWN_FORMAT":
+    if format_type == "CUSTOM_FORMAT":
+        return parse_custom_format(text)
+    elif format_type == "MARKDOWN_FORMAT":
         return parse_markdown_format(text)
     elif format_type == "LIST_FORMAT":
         return parse_list_format(text, year)
