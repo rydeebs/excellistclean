@@ -20,22 +20,21 @@ def standardize_date(date_str, year="2025"):
 
     date_str = str(date_str).strip()
 
-    # Handle full date range: "June 1, 2025 - June 3, 2025" or "June 1 - 3, 2025"
-    # This will always extract the first date
+    # Handle full date range: "May 30, 2025 - Jun 01, 2025" or "May 30 - Jun 1, 2025"
     range_patterns = [
-        # "June 1, 2025 - June 3, 2025" or "June 1, 2025 - 3, 2025"
+        # "May 30, 2025 - Jun 1, 2025" or "May 30, 2025 - 1, 2025"
         r'^(January|February|March|April|May|June|July|August|September|October|November|December|'
         r'Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+(\d{1,2}),?\s*(\d{4})?\s*-\s*'
         r'((January|February|March|April|May|June|July|August|September|October|November|December|'
         r'Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+)?(\d{1,2}),?\s*(\d{4})?$',
-        # "June 1 - 3, 2025"
-        r'^(January|February|March|April|May|June|July|August|September|October|November|December|'
-        r'Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+(\d{1,2})\s*-\s*(\d{1,2}),?\s*(\d{4})?$',
-        # "May 30 - June 1, 2025"
+        # "May 30 - Jun 1, 2025"
         r'^(January|February|March|April|May|June|July|August|September|October|November|December|'
         r'Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+(\d{1,2})\s*-\s*'
         r'(January|February|March|April|May|June|July|August|September|October|November|December|'
-        r'Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+(\d{1,2}),?\s*(\d{4})?$'
+        r'Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+(\d{1,2}),?\s*(\d{4})?$',
+        # "May 30 - 31, 2025"
+        r'^(January|February|March|April|May|June|July|August|September|October|November|December|'
+        r'Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+(\d{1,2})\s*-\s*(\d{1,2}),?\s*(\d{4})?$'
     ]
     for pat in range_patterns:
         match = re.match(pat, date_str, re.IGNORECASE)
