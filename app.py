@@ -741,10 +741,10 @@ def parse_list_format(text, year="2025"):
         tournaments_df = pd.DataFrame(tournaments)
         
         # Ensure all required columns exist
-    for col in REQUIRED_COLUMNS:
+        for col in REQUIRED_COLUMNS:
             if col not in tournaments_df.columns:
                 tournaments_df[col] = None
-                
+        
         return tournaments_df
     else:
         # Return empty DataFrame with all required columns
