@@ -521,11 +521,24 @@ def parse_usga_qualifier_expanded_format(text):
         # Return empty DataFrame with all required columns
         return pd.DataFrame(columns=REQUIRED_COLUMNS)
 
-# Update the detect_format function to recognize USGA qualifier format
 def detect_format(text):
     """Detect which format the text is in."""
     # Split the text into lines and check for patterns
     lines = [line.strip() for line in text.split('\n') if line.strip()]
+    
+    # Check for schedule format with dates followed by event name on same line
+    month_names = ["January", "February", "March", "April", "May", "June", "July", "August", 
+                  "September", "October", "November", "December", "Jan", "Feb", "Mar", 
+                  "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+    date_prefix_pattern = r'^(' + '|'.join(month_names) + r'\.?\s+\d{1,2}(?:[^\w]|$))'
+    
+    schedule_format_count = 0
+    for line in lines:
+        if re.match(date_prefix_pattern, line) and len(line) > 20:
+            schedule_format_count += 1
+    
+    if schedule_format_count >= 3:
+        return "SCHEDULE_FORMAT"
     
     # Check for expanded USGA qualifier format with "Course:" and "Golfers:" lines
     course_prefix_count = 0
@@ -1072,6 +1085,151 @@ def parse_championship_format(text):
         # Return empty DataFrame with all required columns
         return pd.DataFrame(columns=REQUIRED_COLUMNS)
 
+def parse_schedule_format(text):
+    """
+    Parse schedule-style format with date ranges and tournaments on the same line.
+    Format example: 'May 31-June 1 Hot Springs CC Designated Hot Springs CC'
+    """
+    lines = [line.strip() for line in text.split('\n') if line.strip()]
+    
+    tournaments = []
+    
+    # Month abbreviations and full names
+    month_names = ["January", "February", "March", "April", "May", "June", "July", "August", 
+                  "September", "October", "November", "December", "Jan", "Feb", "Mar", 
+                  "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+    
+    # Pattern to identify date at start of line: May 31, June 2, Aug. 7-10, etc.
+    date_prefix_pattern = r'^(' + '|'.join(month_names) + r'\.?\s+\d{1,2}(?:[^\w]|$))'
+    
+    for line in lines:
+        # Skip lines without a date prefix or that are too short (likely notes)
+        if not re.match(date_prefix_pattern, line) or len(line) < 10:
+            continue
+            
+        # Find date section
+        date_match = re.match(r'^(.*?)(?=[A-Z][a-z]+\s+(?:CC|G&AC|GC|Championship|Qualifier|Park|Valley|Creek|Hills|Club))', line)
+        if not date_match:
+            continue
+            
+        date_text = date_match.group(1).strip()
+        
+        # Extract first date from any range (May 31-June 1 -> May 31)
+        if '-' in date_text:
+            first_date = date_text.split('-')[0].strip()
+        else:
+            first_date = date_text
+            
+        # Clean up date (remove abbreviation periods)
+        first_date = first_date.replace(".", "")
+        
+        # Get the formatted date
+        date_value = ultra_simple_date_extractor(first_date, year)
+        if not date_value:
+            continue
+            
+        # Extract tournament name and course
+        rest_of_line = line[len(date_text):].strip()
+        
+        # Try to find the tournament name and course
+        # Common patterns include:
+        # - Tournament type followed by location (State Am. Qualifier #1 Lost Springs G&AC)
+        # - Championship name followed by course (Men's Match-Play Championship Burns Park GC)
+        # - Course followed by modifier and course again (Hot Springs CC Designated Hot Springs CC)
+        
+        # Special case for simple "Tournament Course" pattern
+        if " CC " in rest_of_line or " GC " in rest_of_line or " Park " in rest_of_line:
+            # Find first course indicator and split there
+            course_indicators = ["CC", "GC", "G&AC", "Park", "Creek", "Hills", "Valley", "Club"]
+            split_positions = []
+            
+            for indicator in course_indicators:
+                pos = rest_of_line.find(f" {indicator} ")
+                if pos > 0:
+                    split_positions.append(pos)
+            
+            if split_positions:
+                split_pos = min(split_positions)
+                tournament_name = rest_of_line[:split_pos].strip()
+                course_info = rest_of_line[split_pos:].strip()
+                
+                # Clean up course name (extract first part if multiple courses)
+                if "&" in course_info and not course_info.startswith("G&"):
+                    course_name = course_info.split("&")[0].strip()
+                else:
+                    course_name = course_info
+            else:
+                # Default split halfway through
+                tournament_name = rest_of_line[:len(rest_of_line)//2].strip()
+                course_name = rest_of_line[len(rest_of_line)//2:].strip()
+        else:
+            # Try to split at last word before a 2+ capital letters word (like "CC", "GC")
+            parts = rest_of_line.split()
+            split_idx = len(parts) - 1  # Default to last word
+            
+            for i in range(len(parts) - 1, 0, -1):
+                if re.match(r'^[A-Z]{2,}$', parts[i]) or parts[i] in ["CC", "GC", "G&AC"]:
+                    split_idx = i - 1
+                    break
+            
+            tournament_name = " ".join(parts[:split_idx]).strip()
+            course_name = " ".join(parts[split_idx:]).strip()
+            
+            # If parsing failed, use a simple ratio-based split
+            if not tournament_name or not course_name:
+                split_point = int(len(rest_of_line) * 0.6)  # 60/40 split favoring tournament name
+                tournament_name = rest_of_line[:split_point].strip()
+                course_name = rest_of_line[split_point:].strip()
+        
+        # Create tournament entry
+        tournament = {
+            'Date': date_value,
+            'Name': tournament_name,
+            'Course': course_name,
+            'Category': "Men's",  # Default category
+            'City': None,
+            'State': default_state if default_state else None,
+            'Zip': None
+        }
+        
+        # Set category based on tournament name
+        name = tournament_name.lower()
+        if "amateur" in name or "am." in name:
+            tournament['Category'] = "Amateur"
+        elif "senior" in name:
+            tournament['Category'] = "Seniors"
+        elif "women" in name or "ladies" in name or "girls" in name:
+            tournament['Category'] = "Women's"
+        elif "junior" in name or "boys" in name:
+            tournament['Category'] = "Junior's"
+        elif "mid-amateur" in name or "mid-am" in name:
+            tournament['Category'] = "Mid-Amateur"
+        elif "four-ball" in name:
+            tournament['Category'] = "Four-Ball"
+        elif "father" in name and "son" in name:
+            tournament['Category'] = "Mixed/Couples"
+        
+        # Set gender based on tournament name
+        tournament['Gender'] = determine_gender(tournament_name)
+        
+        tournaments.append(tournament)
+    
+    # Convert to DataFrame
+    if tournaments:
+        st.write(f"Debug: Found {len(tournaments)} tournaments in schedule format")
+        
+        tournaments_df = pd.DataFrame(tournaments)
+        
+        # Ensure all required columns exist
+        for col in REQUIRED_COLUMNS:
+            if col not in tournaments_df.columns:
+                tournaments_df[col] = None
+                
+        return tournaments_df
+    else:
+        # Return empty DataFrame with all required columns
+        return pd.DataFrame(columns=REQUIRED_COLUMNS)
+
 def parse_simple_format(text):
     """Parse simple format with dates followed by course info."""
     # Split the text into lines and remove empty lines
@@ -1174,7 +1332,9 @@ def parse_tournament_text(text):
     format_type = detect_format(text)
     st.write(f"Detected format: {format_type}")
     
-    if format_type == "USGA_QUALIFIER_EXPANDED_FORMAT":
+    if format_type == "SCHEDULE_FORMAT":
+        return parse_schedule_format(text)
+    elif format_type == "USGA_QUALIFIER_EXPANDED_FORMAT":
         return parse_usga_qualifier_expanded_format(text)
     elif format_type == "USGA_QUALIFIER_FORMAT":
         return parse_usga_qualifier_format(text)
