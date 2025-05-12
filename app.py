@@ -237,6 +237,7 @@ def parse_markdown_format(text):
         return inspect_dataframe(tournaments_df)
     else:
         # Return empty DataFrame with all required columns
+        return pd.DataFrame(columns=REQUIRED_COLUMNS)
 
 def parse_list_format(text, year="2025"):
     """
