@@ -404,7 +404,7 @@ def parse_usga_qualifier_format(text):
             if tournament_data['Name'] and tournament_data['Date']:
                 tournaments.append(tournament_data)
             else:
-            i += 1
+                i += 1
     
     # Convert to DataFrame
     if tournaments:
@@ -416,7 +416,7 @@ def parse_usga_qualifier_format(text):
                 tournaments_df[col] = None
                 
         return tournaments_df
-                else:
+    else:
         # Return empty DataFrame with all required columns
         return pd.DataFrame(columns=REQUIRED_COLUMNS)
 
@@ -739,7 +739,7 @@ def parse_list_format(text, year="2025"):
         tournaments_df = pd.DataFrame(tournaments)
         
         # Ensure all required columns exist
-    for col in REQUIRED_COLUMNS:
+        for col in REQUIRED_COLUMNS:
             if col not in tournaments_df.columns:
                 tournaments_df[col] = None
                 
@@ -839,7 +839,7 @@ def parse_tabular_format(text):
                 
             if j >= len(lines):
                 break
-                        else:
+        else:
             i += 1
     
     # Convert to DataFrame
@@ -852,7 +852,7 @@ def parse_tabular_format(text):
                 tournaments_df[col] = None
                 
         return tournaments_df
-                    else:
+    else:
         # Return empty DataFrame with all required columns
         return pd.DataFrame(columns=REQUIRED_COLUMNS)
 
@@ -898,7 +898,7 @@ def parse_championship_format(text):
                 current_tournament['Category'] = "Junior's"
             elif "Women's" in tournament_name or "Womens" in tournament_name or "Ladies" in tournament_name:
                 current_tournament['Category'] = "Women's"
-else:
+            else:
                 current_tournament['Category'] = "Men's"  # Default category
             
             i += 1
