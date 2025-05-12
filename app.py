@@ -20,11 +20,18 @@ def standardize_date(date_str, year="2025"):
 
     date_str = str(date_str).strip()
 
-    # Handle full date range: "June 1, 2025 - June 5, 2025"
-    full_date_range_pattern = r'^(January|February|March|April|May|June|July|August|September|October|November|December|Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+(\d{1,2}),?\s*(\d{4})?\s*-\s*(?:January|February|March|April|May|June|July|August|September|October|November|December|Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)?\s*\d{1,2},?\s*\d{0,4}'
+    # Handle full date range: "June 1, 2025 - June 3, 2025" or "June 1, 2025 - 3, 2025"
+    full_date_range_pattern = (
+        r'^(January|February|March|April|May|June|July|August|September|October|November|December|'
+        r'Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+(\d{1,2}),?\s*(\d{4})?'
+        r'\s*-\s*'
+        r'((January|February|March|April|May|June|July|August|September|October|November|December|'
+        r'Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+)?(\d{1,2}),?\s*(\d{4})?'
+        r'$'
+    )
     match = re.match(full_date_range_pattern, date_str, re.IGNORECASE)
     if match:
-        month, day, yr = match.groups()
+        month, day, yr, _, _, _, _ = match.groups()
         current_year = yr if yr else year
         month_dict = {
             'January': '01', 'Jan': '01', 'February': '02', 'Feb': '02', 'March': '03', 'Mar': '03',
@@ -36,11 +43,14 @@ def standardize_date(date_str, year="2025"):
         day_padded = day.zfill(2)
         return f"{current_year}-{month_num}-{day_padded}"
 
-    # Handle date ranges like "June 1 - 5, 2025" or "June 1-5, 2025"
-    range_pattern = r'^(January|February|March|April|May|June|July|August|September|October|November|December|Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+(\d{1,2})\s*-\s*\d{1,2},?\s*(\d{4})?$'
+    # Handle date ranges like "June 1 - 3, 2025" or "June 1-3, 2025"
+    range_pattern = (
+        r'^(January|February|March|April|May|June|July|August|September|October|November|December|'
+        r'Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+(\d{1,2})\s*-\s*(\d{1,2}),?\s*(\d{4})?$'
+    )
     match = re.match(range_pattern, date_str, re.IGNORECASE)
     if match:
-        month, day, yr = match.groups()
+        month, day, _, yr = match.groups()
         current_year = yr if yr else year
         month_dict = {
             'January': '01', 'Jan': '01', 'February': '02', 'Feb': '02', 'March': '03', 'Mar': '03',
@@ -53,10 +63,15 @@ def standardize_date(date_str, year="2025"):
         return f"{current_year}-{month_num}-{day_padded}"
 
     # Handle cross-month ranges like "May 30 - June 1, 2025"
-    cross_month_range = r'^(January|February|March|April|May|June|July|August|September|October|November|December|Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+(\d{1,2})\s*-\s*(January|February|March|April|May|June|July|August|September|October|November|December|Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d{1,2},?\s*(\d{4})?$'
+    cross_month_range = (
+        r'^(January|February|March|April|May|June|July|August|September|October|November|December|'
+        r'Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+(\d{1,2})\s*-\s*'
+        r'(January|February|March|April|May|June|July|August|September|October|November|December|'
+        r'Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+(\d{1,2}),?\s*(\d{4})?$'
+    )
     match = re.match(cross_month_range, date_str, re.IGNORECASE)
     if match:
-        month1, day1, _, yr = match.groups()
+        month1, day1, _, _, yr = match.groups()
         current_year = yr if yr else year
         month_dict = {
             'January': '01', 'Jan': '01', 'February': '02', 'Feb': '02', 'March': '03', 'Mar': '03',
@@ -935,6 +950,9 @@ if st.button("Process Tournament Data"):
             
             # Standardize names
             df = standardize_tournament_names(df)
+            
+            # Standardize all dates in the Date column (this is the key step!)
+            df["Date"] = df["Date"].apply(lambda x: standardize_date(x, year))
             
             # Display parsed data
             st.dataframe(df)
