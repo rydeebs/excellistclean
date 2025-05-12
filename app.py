@@ -109,10 +109,160 @@ def inspect_dataframe(df):
             st.write(f"Row {i}: {dict(row)}")
     return df
 
+# Add this new function to your existing code
+def parse_status_based_format(text):
+    """
+    Parse tournament format with status indicators and explicit tournament names.
+    This format handles patterns like:
+    OPEN/CLOSED
+    [optional] closes on
+    [optional] DAY, MONTH DATE
+    [optional] TIME TIMEZONE
+    Tournament Name
+    View
+    Start Date - End Date
+    [optional] Next Round info
+    Course
+    
+    This works for any state, not just Arizona.
+    """
+    # Split the text into lines and remove empty lines
+    lines = [line.strip() for line in text.split('\n') if line.strip()]
+    
+    tournaments = []
+    i = 0
+    
+    while i < len(lines):
+        tournament_data = {col: None for col in REQUIRED_COLUMNS}
+        
+        # Check for status line (OPEN, CLOSED, etc.)
+        if i < len(lines) and lines[i] in ["OPEN", "CLOSED", "REGISTRATION OPEN", "SOLD OUT", "INVITATION LIST"]:
+            status = lines[i]  # Store status but don't use it as the name
+            i += 1
+            
+            # Skip "closes on" line if present
+            if i < len(lines) and ("closes on" in lines[i].lower() or "registration" in lines[i].lower()):
+                i += 1
+                
+            # Skip date line (usually in format DAY, MONTH DATE)
+            if i < len(lines) and re.match(r'^[A-Z]{3},\s+[A-Z]{3}\s+\d{1,2}$', lines[i]):
+                i += 1
+                
+            # Skip time line (usually in format TIME TIMEZONE)
+            if i < len(lines) and re.match(r'^\d{1,2}:\d{2}\s+[AP]M\s+[A-Z]{3,4}$', lines[i]):
+                i += 1
+                
+            # Now we should be at the tournament name
+            # It should not be "View" and not look like a date
+            if i < len(lines) and lines[i] != "View" and not re.match(r'^[A-Za-z]{3},\s+[A-Za-z]{3}\s+\d{1,2}', lines[i]):
+                tournament_data['Name'] = lines[i].strip()
+                i += 1
+                
+                # Skip "View" link or other action buttons
+                if i < len(lines) and (lines[i] == "View" or lines[i] == "Register" or lines[i] == "Details"):
+                    i += 1
+                    
+                # Extract date from date range
+                date_value = None
+                if i < len(lines) and re.search(r'[A-Za-z]{3},\s+[A-Za-z]{3}\s+\d{1,2}', lines[i]):
+                    date_line = lines[i]
+                    # Extract first date from date range
+                    date_parts = date_line.split('-')[0].strip()
+                    date_value = ultra_simple_date_extractor(date_parts, year)
+                    tournament_data['Date'] = date_value
+                    i += 1
+                
+                # Skip "Next Round" line
+                if i < len(lines) and "Next Round:" in lines[i]:
+                    i += 1
+                    
+                # Extract course information
+                if i < len(lines):
+                    course_line = lines[i]
+                    # If this line looks like a date and we don't have a date yet, use it as date
+                    if date_value is None and re.search(r'[A-Za-z]{3},\s+[A-Za-z]{3}\s+\d{1,2}', course_line):
+                        date_parts = course_line.split('-')[0].strip()
+                        tournament_data['Date'] = ultra_simple_date_extractor(date_parts, year)
+                    else:
+                        tournament_data['Course'] = course_line.strip()
+                    i += 1
+                
+                # Set default category based on tournament name
+                name = tournament_data['Name']
+                if name:
+                    if "Amateur" in name:
+                        tournament_data['Category'] = "Amateur"
+                    elif "Senior" in name or "Mid-Amateur" in name:
+                        tournament_data['Category'] = "Seniors"
+                    elif "Women" in name or "Ladies" in name:
+                        tournament_data['Category'] = "Women's"
+                    elif "Junior" in name or "Boys'" in name or "Girls'" in name:
+                        tournament_data['Category'] = "Junior's"
+                    elif any(x in name for x in ["Father", "Son", "Parent", "Child", "Mother", "Daughter", "Family"]):
+                        tournament_data['Category'] = "Parent/Child"
+                    else:
+                        tournament_data['Category'] = "Men's"  # Default category
+                
+                # Set default state if provided
+                if default_state:
+                    tournament_data['State'] = default_state
+                    
+                # Try to extract state from tournament name
+                state_match = re.search(r'\b([A-Z]{2})\b', name) if name else None
+                if state_match:
+                    potential_state = state_match.group(1)
+                    # Verify it's a valid state code
+                    valid_states = ["AL", "AK", "AZ", "AR", "CA", "CO", "CT", "DE", "FL", "GA", 
+                                   "HI", "ID", "IL", "IN", "IA", "KS", "KY", "LA", "ME", "MD", 
+                                   "MA", "MI", "MN", "MS", "MO", "MT", "NE", "NV", "NH", "NJ", 
+                                   "NM", "NY", "NC", "ND", "OH", "OK", "OR", "PA", "RI", "SC", 
+                                   "SD", "TN", "TX", "UT", "VT", "VA", "WA", "WV", "WI", "WY", "DC"]
+                    if potential_state in valid_states:
+                        tournament_data['State'] = potential_state
+                
+                # Add tournament to the list if it has at least a name
+                if tournament_data['Name']:
+                    tournaments.append(tournament_data)
+            else:
+                # If we don't find what we expect, move to next line
+                i += 1
+        else:
+            # Move to next line if not at a status line
+            i += 1
+    
+    # Convert to DataFrame
+    if tournaments:
+        tournaments_df = pd.DataFrame(tournaments)
+        
+        # Ensure all required columns exist
+        for col in REQUIRED_COLUMNS:
+            if col not in tournaments_df.columns:
+                tournaments_df[col] = None
+                
+        return tournaments_df
+    else:
+        # Return empty DataFrame with all required columns
+        return pd.DataFrame(columns=REQUIRED_COLUMNS)
+
+# Replace your existing detect_format function with this updated version
 def detect_format(text):
     """Detect which format the text is in."""
     # Split the text into lines and check for patterns
     lines = [line.strip() for line in text.split('\n') if line.strip()]
+    
+    # Check for status-based format (OPEN/CLOSED with View)
+    status_keywords = ["OPEN", "CLOSED", "REGISTRATION OPEN", "SOLD OUT", "INVITATION LIST"]
+    status_count = 0
+    view_count = 0
+    
+    for line in lines:
+        if line in status_keywords:
+            status_count += 1
+        if line == "View" or line == "Register" or line == "Details":
+            view_count += 1
+    
+    if status_count >= 2 and view_count >= 2:
+        return "STATUS_BASED_FORMAT"
     
     # Special case for custom format
     date_range_count = 0
@@ -714,7 +864,9 @@ def parse_tournament_text(text):
     format_type = detect_format(text)
     st.write(f"Detected format: {format_type}")
     
-    if format_type == "CUSTOM_FORMAT":
+    if format_type == "STATUS_BASED_FORMAT":
+        return parse_status_based_format(text)
+    elif format_type == "CUSTOM_FORMAT":
         return parse_custom_format(text)
     elif format_type == "MARKDOWN_FORMAT":
         return parse_markdown_format(text)
