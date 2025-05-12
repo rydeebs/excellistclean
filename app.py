@@ -16,7 +16,7 @@ st.title("Golf Tournament Data Parser")
 st.write("Paste your tournament text data and we'll parse it into a structured format.")
 
 # Required columns
-REQUIRED_COLUMNS = ["Date", "Name", "Course", "Category", "City", "State", "Zip"]
+REQUIRED_COLUMNS = ["Date", "Name", "Course", "Category", "City", "State", "Zip", "Gender"]
 
 def ultra_simple_date_extractor(text, default_year="2025"):
     """
@@ -699,7 +699,8 @@ def parse_list_format(text, year="2025"):
                 'Category': "Men's",  # Default category
                 'City': city.strip(),
                 'State': state,
-                'Zip': None
+                'Zip': None,
+                'Gender': determine_gender(tournament_name)  # Add gender determination
             }
             
             # Determine category based on tournament name
