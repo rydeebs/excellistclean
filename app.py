@@ -19,6 +19,7 @@ def standardize_date(date_str, year="2025"):
         return None
 
     date_str = str(date_str).strip()
+    st.write(f"Processing date string: {date_str}")  # Debug log
 
     # Handle full date range: "May 30, 2025 - Jun 01, 2025" or "May 30 - Jun 1, 2025"
     range_patterns = [
@@ -36,9 +37,11 @@ def standardize_date(date_str, year="2025"):
         r'^(January|February|March|April|May|June|July|August|September|October|November|December|'
         r'Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+(\d{1,2})\s*-\s*(\d{1,2}),?\s*(\d{4})?$'
     ]
+    
     for pat in range_patterns:
         match = re.match(pat, date_str, re.IGNORECASE)
         if match:
+            st.write(f"Found match with pattern: {pat}")  # Debug log
             # Always extract the first date
             month = match.group(1)
             day = match.group(2)
@@ -52,12 +55,15 @@ def standardize_date(date_str, year="2025"):
             }
             month_num = month_dict.get(month.capitalize(), '01')
             day_padded = day.zfill(2)
-            return f"{current_year}-{month_num}-{day_padded}"
+            result = f"{current_year}-{month_num}-{day_padded}"
+            st.write(f"Extracted date: {result}")  # Debug log
+            return result
 
     # Handle single full date like "June 1, 2025"
     full_date_pattern = r'^(January|February|March|April|May|June|July|August|September|October|November|December|Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+(\d{1,2})(?:,\s+(\d{4}))?$'
     match = re.match(full_date_pattern, date_str, re.IGNORECASE)
     if match:
+        st.write("Found match with full date pattern")  # Debug log
         month, day, yr = match.groups()
         current_year = yr if yr else year
         month_dict = {
@@ -68,7 +74,9 @@ def standardize_date(date_str, year="2025"):
         }
         month_num = month_dict.get(month.capitalize(), '01')
         day_padded = day.zfill(2)
-        return f"{current_year}-{month_num}-{day_padded}"
+        result = f"{current_year}-{month_num}-{day_padded}"
+        st.write(f"Extracted date: {result}")  # Debug log
+        return result
 
     # Try different date formats
     date_formats = [
@@ -78,10 +86,13 @@ def standardize_date(date_str, year="2025"):
     ]
     for fmt in date_formats:
         try:
-            return datetime.strptime(date_str, fmt).strftime('%Y-%m-%d')
+            result = datetime.strptime(date_str, fmt).strftime('%Y-%m-%d')
+            st.write(f"Parsed with format {fmt}: {result}")  # Debug log
+            return result
         except ValueError:
             continue
 
+    st.write(f"Could not parse date: {date_str}")  # Debug log
     return date_str
 
 def standardize_state(state_str):
@@ -893,22 +904,19 @@ if st.button("Process Tournament Data"):
             st.subheader("Parsed Tournament Data")
             st.write(f"Found {len(df)} tournaments")
             
-            # Check if DataFrame is empty
-            if df.empty:
-                st.error("No tournaments could be extracted from the text. Please check the format.")
-                # Create an empty DataFrame with all required columns
-                df = pd.DataFrame(columns=REQUIRED_COLUMNS)
-            else:
-                # Ensure all required columns exist
-                for col in REQUIRED_COLUMNS:
-                    if col not in df.columns:
-                        df[col] = None
+            # Debug: Show the Date column before standardization
+            st.write("Date column before standardization:")
+            st.write(df['Date'])
             
             # Standardize names
             df = standardize_tournament_names(df)
             
-            # Standardize all dates in the Date column (this is the key step!)
+            # Standardize all dates in the Date column
             df["Date"] = df["Date"].apply(lambda x: standardize_date(x, year))
+            
+            # Debug: Show the Date column after standardization
+            st.write("Date column after standardization:")
+            st.write(df['Date'])
             
             # Display parsed data
             st.dataframe(df)
