@@ -1345,6 +1345,17 @@ default_state = st.selectbox(
 # File naming option
 output_filename = st.text_input("Output Filename (without extension):", "golf_tournaments")
 
+def ensure_column_order(df):
+    """Ensure DataFrame columns are in the correct order."""
+    # Get all columns that exist in the DataFrame
+    existing_columns = [col for col in REQUIRED_COLUMNS if col in df.columns]
+    
+    # Add any additional columns that might exist
+    other_columns = [col for col in df.columns if col not in REQUIRED_COLUMNS]
+    
+    # Reorder columns
+    return df[existing_columns + other_columns]
+
 # Process button
 if st.button("Process Tournament Data"):
     if tournament_text:
@@ -1416,14 +1427,3 @@ if st.button("Process Tournament Data"):
             st.code(traceback.format_exc())
     else:
         st.error("Please enter tournament text data.")
-
-def ensure_column_order(df):
-    """Ensure DataFrame columns are in the correct order."""
-    # Get all columns that exist in the DataFrame
-    existing_columns = [col for col in REQUIRED_COLUMNS if col in df.columns]
-    
-    # Add any additional columns that might exist
-    other_columns = [col for col in df.columns if col not in REQUIRED_COLUMNS]
-    
-    # Reorder columns
-    return df[existing_columns + other_columns]
