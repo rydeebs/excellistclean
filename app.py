@@ -16,7 +16,7 @@ st.title("Golf Tournament Data Parser")
 st.write("Paste your tournament text data and we'll parse it into a structured format.")
 
 # Required columns
-REQUIRED_COLUMNS = ["Date", "Name", "Course", "Category", "City", "State", "Zip", "Gender"]
+REQUIRED_COLUMNS = ["Date", "Name", "Course", "Category", "Gender", "City", "State", "Zip"]
 
 def ultra_simple_date_extractor(text, default_year="2025"):
     """
@@ -102,11 +102,23 @@ def determine_gender(tournament_name):
     Determine gender from tournament name by looking for specific keywords.
     Returns "Women's" or "Men's" based on analysis.
     """
+    if not tournament_name:
+        return "Men's"  # Default to Men's if no name provided
+        
+    tournament_name = str(tournament_name).lower()
+    
     # Keywords that indicate women's tournaments
-    women_keywords = ["Women", "Women's", "Ladies", "Ladies'", "Girls", "Girls'", "EmpowHER"]
+    women_keywords = [
+        "women", "women's", "womens", "ladies", "ladies'", "girls", "girls'", 
+        "empowher", "female", "women's championship", "ladies championship",
+        "women's amateur", "ladies amateur", "women's open", "ladies open"
+    ]
     
     # Keywords that indicate men's tournaments
-    men_keywords = ["Men", "Men's", "Boys", "Boys'"]
+    men_keywords = [
+        "men", "men's", "mens", "boys", "boys'", "male", "men's championship",
+        "men's amateur", "men's open", "senior men", "super senior men"
+    ]
     
     # Check for women's indicators first
     for keyword in women_keywords:
@@ -153,8 +165,8 @@ def inspect_dataframe(df):
     with st.expander("Show full DataFrame for debugging"):
         for i, row in df.iterrows():
             st.write(f"Row {i}: {dict(row)}")
-    return df
-
+        return df
+    
 def parse_status_based_format(text):
     """
     Parse tournament format with status indicators and explicit tournament names.
@@ -391,7 +403,7 @@ def parse_usga_qualifier_format(text):
             # Add tournament to the list
             if tournament_data['Name'] and tournament_data['Date']:
                 tournaments.append(tournament_data)
-        else:
+            else:
             i += 1
     
     # Convert to DataFrame
@@ -404,7 +416,7 @@ def parse_usga_qualifier_format(text):
                 tournaments_df[col] = None
                 
         return tournaments_df
-    else:
+                else:
         # Return empty DataFrame with all required columns
         return pd.DataFrame(columns=REQUIRED_COLUMNS)
 
@@ -564,8 +576,8 @@ def parse_markdown_format(text):
             
             # Add the tournament to our list
             tournaments.append(tournament)
-    
-    # Convert to DataFrame
+        
+        # Convert to DataFrame
     if tournaments:
         st.write(f"Debug: Found {len(tournaments)} tournaments in markdown format")
         for i, t in enumerate(tournaments[:5]):
@@ -697,10 +709,10 @@ def parse_list_format(text, year="2025"):
                 'Name': tournament_name.strip(),
                 'Course': course_name.strip(),
                 'Category': "Men's",  # Default category
+                'Gender': determine_gender(tournament_name),  # Determine gender from name
                 'City': city.strip(),
                 'State': state,
-                'Zip': None,
-                'Gender': determine_gender(tournament_name)  # Add gender determination
+                'Zip': None
             }
             
             # Determine category based on tournament name
@@ -727,7 +739,7 @@ def parse_list_format(text, year="2025"):
         tournaments_df = pd.DataFrame(tournaments)
         
         # Ensure all required columns exist
-        for col in REQUIRED_COLUMNS:
+    for col in REQUIRED_COLUMNS:
             if col not in tournaments_df.columns:
                 tournaments_df[col] = None
                 
@@ -827,7 +839,7 @@ def parse_tabular_format(text):
                 
             if j >= len(lines):
                 break
-        else:
+                        else:
             i += 1
     
     # Convert to DataFrame
@@ -840,7 +852,7 @@ def parse_tabular_format(text):
                 tournaments_df[col] = None
                 
         return tournaments_df
-    else:
+                    else:
         # Return empty DataFrame with all required columns
         return pd.DataFrame(columns=REQUIRED_COLUMNS)
 
@@ -886,7 +898,7 @@ def parse_championship_format(text):
                 current_tournament['Category'] = "Junior's"
             elif "Women's" in tournament_name or "Womens" in tournament_name or "Ladies" in tournament_name:
                 current_tournament['Category'] = "Women's"
-            else:
+else:
                 current_tournament['Category'] = "Men's"  # Default category
             
             i += 1
@@ -1195,6 +1207,12 @@ if st.button("Process Tournament Data"):
                 for col in REQUIRED_COLUMNS:
                     if col not in df.columns:
                         df[col] = None
+                
+                # Ensure Gender is set for all rows
+                df['Gender'] = df['Name'].apply(determine_gender)
+                
+                # Ensure columns are in the correct order
+                df = ensure_column_order(df)
             
             # Display how many tournaments were found
             st.success(f"Successfully extracted {len(df)} tournaments!")
@@ -1243,3 +1261,14 @@ if st.button("Process Tournament Data"):
             st.code(traceback.format_exc())
     else:
         st.error("Please enter tournament text data.")
+
+def ensure_column_order(df):
+    """Ensure DataFrame columns are in the correct order."""
+    # Get all columns that exist in the DataFrame
+    existing_columns = [col for col in REQUIRED_COLUMNS if col in df.columns]
+    
+    # Add any additional columns that might exist
+    other_columns = [col for col in df.columns if col not in REQUIRED_COLUMNS]
+    
+    # Reorder columns
+    return df[existing_columns + other_columns]
