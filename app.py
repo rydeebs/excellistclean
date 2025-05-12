@@ -20,68 +20,40 @@ def standardize_date(date_str, year="2025"):
 
     date_str = str(date_str).strip()
 
-    # Handle full date range: "June 1, 2025 - June 3, 2025" or "June 1, 2025 - 3, 2025"
-    full_date_range_pattern = (
+    # Handle full date range: "June 1, 2025 - June 3, 2025" or "June 1 - 3, 2025"
+    # This will always extract the first date
+    range_patterns = [
+        # "June 1, 2025 - June 3, 2025" or "June 1, 2025 - 3, 2025"
         r'^(January|February|March|April|May|June|July|August|September|October|November|December|'
-        r'Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+(\d{1,2}),?\s*(\d{4})?'
-        r'\s*-\s*'
+        r'Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+(\d{1,2}),?\s*(\d{4})?\s*-\s*'
         r'((January|February|March|April|May|June|July|August|September|October|November|December|'
-        r'Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+)?(\d{1,2}),?\s*(\d{4})?'
-        r'$'
-    )
-    match = re.match(full_date_range_pattern, date_str, re.IGNORECASE)
-    if match:
-        month, day, yr, _, _, _, _ = match.groups()
-        current_year = yr if yr else year
-        month_dict = {
-            'January': '01', 'Jan': '01', 'February': '02', 'Feb': '02', 'March': '03', 'Mar': '03',
-            'April': '04', 'Apr': '04', 'May': '05', 'June': '06', 'Jun': '06', 'July': '07',
-            'Jul': '07', 'August': '08', 'Aug': '08', 'September': '09', 'Sep': '09',
-            'October': '10', 'Oct': '10', 'November': '11', 'Nov': '11', 'December': '12', 'Dec': '12'
-        }
-        month_num = month_dict.get(month.capitalize(), '01')
-        day_padded = day.zfill(2)
-        return f"{current_year}-{month_num}-{day_padded}"
-
-    # Handle date ranges like "June 1 - 3, 2025" or "June 1-3, 2025"
-    range_pattern = (
+        r'Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+)?(\d{1,2}),?\s*(\d{4})?$',
+        # "June 1 - 3, 2025"
         r'^(January|February|March|April|May|June|July|August|September|October|November|December|'
-        r'Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+(\d{1,2})\s*-\s*(\d{1,2}),?\s*(\d{4})?$'
-    )
-    match = re.match(range_pattern, date_str, re.IGNORECASE)
-    if match:
-        month, day, _, yr = match.groups()
-        current_year = yr if yr else year
-        month_dict = {
-            'January': '01', 'Jan': '01', 'February': '02', 'Feb': '02', 'March': '03', 'Mar': '03',
-            'April': '04', 'Apr': '04', 'May': '05', 'June': '06', 'Jun': '06', 'July': '07',
-            'Jul': '07', 'August': '08', 'Aug': '08', 'September': '09', 'Sep': '09',
-            'October': '10', 'Oct': '10', 'November': '11', 'Nov': '11', 'December': '12', 'Dec': '12'
-        }
-        month_num = month_dict.get(month.capitalize(), '01')
-        day_padded = day.zfill(2)
-        return f"{current_year}-{month_num}-{day_padded}"
-
-    # Handle cross-month ranges like "May 30 - June 1, 2025"
-    cross_month_range = (
+        r'Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+(\d{1,2})\s*-\s*(\d{1,2}),?\s*(\d{4})?$',
+        # "May 30 - June 1, 2025"
         r'^(January|February|March|April|May|June|July|August|September|October|November|December|'
         r'Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+(\d{1,2})\s*-\s*'
         r'(January|February|March|April|May|June|July|August|September|October|November|December|'
         r'Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+(\d{1,2}),?\s*(\d{4})?$'
-    )
-    match = re.match(cross_month_range, date_str, re.IGNORECASE)
-    if match:
-        month1, day1, _, _, yr = match.groups()
-        current_year = yr if yr else year
-        month_dict = {
-            'January': '01', 'Jan': '01', 'February': '02', 'Feb': '02', 'March': '03', 'Mar': '03',
-            'April': '04', 'Apr': '04', 'May': '05', 'June': '06', 'Jun': '06', 'July': '07',
-            'Jul': '07', 'August': '08', 'Aug': '08', 'September': '09', 'Sep': '09',
-            'October': '10', 'Oct': '10', 'November': '11', 'Nov': '11', 'December': '12', 'Dec': '12'
-        }
-        month_num = month_dict.get(month1.capitalize(), '01')
-        day_padded = day1.zfill(2)
-        return f"{current_year}-{month_num}-{day_padded}"
+    ]
+    for pat in range_patterns:
+        match = re.match(pat, date_str, re.IGNORECASE)
+        if match:
+            # Always extract the first date
+            month = match.group(1)
+            day = match.group(2)
+            yr = match.group(3)
+            current_year = yr if yr else year
+            month_dict = {
+                'January': '01', 'Jan': '01', 'February': '02', 'Feb': '02', 'March': '03', 'Mar': '03',
+                'April': '04', 'Apr': '04', 'May': '05', 'June': '06', 'Jun': '06', 'July': '07',
+                'Jul': '07', 'August': '08', 'Aug': '08', 'September': '09', 'Sep': '09',
+                'October': '10', 'Oct': '10', 'November': '11', 'Nov': '11', 'December': '12', 'Dec': '12'
+            }
+            month_num = month_dict.get(month.capitalize(), '01')
+            day_padded = day.zfill(2)
+            return f"{current_year}-{month_num}-{day_padded}"
 
     # Handle single full date like "June 1, 2025"
     full_date_pattern = r'^(January|February|March|April|May|June|July|August|September|October|November|December|Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+(\d{1,2})(?:,\s+(\d{4}))?$'
@@ -98,21 +70,6 @@ def standardize_date(date_str, year="2025"):
         month_num = month_dict.get(month.capitalize(), '01')
         day_padded = day.zfill(2)
         return f"{current_year}-{month_num}-{day_padded}"
-
-    # Handle month and day only (add year)
-    month_day_pattern = r'^(January|February|March|April|May|June|July|August|September|October|November|December|Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[.,\s]+(\d{1,2})$'
-    match = re.match(month_day_pattern, date_str, re.IGNORECASE)
-    if match:
-        month, day = match.groups()
-        month_dict = {
-            'January': '01', 'Jan': '01', 'February': '02', 'Feb': '02', 'March': '03', 'Mar': '03',
-            'April': '04', 'Apr': '04', 'May': '05', 'June': '06', 'Jun': '06', 'July': '07',
-            'Jul': '07', 'August': '08', 'Aug': '08', 'September': '09', 'Sep': '09',
-            'October': '10', 'Oct': '10', 'November': '11', 'Nov': '11', 'December': '12', 'Dec': '12'
-        }
-        month_num = month_dict.get(month.capitalize(), '01')
-        day_padded = day.zfill(2)
-        return f"{year}-{month_num}-{day_padded}"
 
     # Try different date formats
     date_formats = [
