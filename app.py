@@ -304,6 +304,7 @@ def parse_list_format(text, year="2025"):
     """
     Parse the list format with tournament name, course, location, and date range.
     Uses ultra-simple direct date extraction method.
+    Processes all rows without artificial limitations.
     """
     lines = [line.strip() for line in text.split('\n') if line.strip()]
     
@@ -314,17 +315,15 @@ def parse_list_format(text, year="2025"):
     if i < len(lines) and ("TOURNAMENT" in lines[i].upper() or "FUTURE" in lines[i].upper()):
         i += 1
     
-    while i < len(lines) - 3:  # Need at least 4 lines for a complete entry
-        if len(lines) - i < 4:
-            break  # Not enough lines left
-        
+    # Process all lines in groups of 4 (name, course, location, date)
+    while i <= len(lines) - 4:  # Changed < to <= to ensure we process all entries
         # Assume pattern: Tournament Name, Course, Location, Date Range
         tournament_name = lines[i]
         course_name = lines[i+1]
         location_line = lines[i+2]
         date_line = lines[i+3]
         
-        # Skip to next line if this line seems to be a date
+        # Skip to next line if this line seems to be a date (probably not a name)
         month_names = ["January", "February", "March", "April", "May", "June", "July", "August", 
                       "September", "October", "November", "December", "Jan", "Feb", "Mar", 
                       "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
@@ -368,7 +367,7 @@ def parse_list_format(text, year="2025"):
             # Add the tournament to our list
             tournaments.append(tournament)
         
-        # Move to next entry (skip the 4 lines we just processed)
+        # Always move forward by 4 lines after processing a group
         i += 4
     
     # Convert to DataFrame
