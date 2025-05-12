@@ -666,9 +666,6 @@ if st.button("Process Tournament Data"):
             # Parse the text
             df = parse_tournament_text(tournament_text)
             
-            # Display debug information about the dataframe
-            st.write(f"Debug: DataFrame shape: {df.shape}")
-            
             # Check if DataFrame is empty
             if df.empty:
                 st.error("No tournaments could be extracted from the text. Please check the format.")
@@ -680,9 +677,16 @@ if st.button("Process Tournament Data"):
                     if col not in df.columns:
                         df[col] = None
             
-            # Display the entire parsed dataframe with more height to show all rows  
-            st.subheader("Parsed Tournament Data")
-            st.dataframe(df, height=600)  # Set specific height to show more rows
+            # Display how many tournaments were found
+            st.success(f"Successfully extracted {len(df)} tournaments!")
+            
+            # Display the full DataFrame without pagination (show all rows)
+            st.write("### Extracted Tournament Data")
+            st.write(df)
+            
+            # Also show the raw data in table format to ensure all rows are visible
+            st.write("### Tournament Table (All Rows)")
+            st.table(df.head(100))  # Show up to 100 rows in table format
             
             # Create download buttons for the data
             csv = df.to_csv(index=False)
@@ -720,66 +724,3 @@ if st.button("Process Tournament Data"):
             st.code(traceback.format_exc())
     else:
         st.error("Please enter tournament text data.")
-
-# Sidebar with instructions
-with st.sidebar:
-    st.header("Instructions")
-    st.write("""
-    ### How to Use This App:
-    
-    1. Select an example format or paste your own tournament text data
-    2. Set the default tournament year
-    3. Select the default state for tournaments (optional)
-    4. Enter a filename for your output file
-    5. Click the "Process Tournament Data" button
-    6. Review the extracted information
-    7. Download the cleaned data in CSV or Excel format
-    
-    ### Supported Formats:
-    
-    The app supports four main formats of tournament data:
-    
-    **Format 1 - Simple List:**
-    ```
-    May 7
-    Entries Close: May 2, 2025
-    The Club at Admirals Cove - North/West Course
-    The Club at Admirals Cove, Jupiter, FL
-    ```
-    
-    **Format 2 - Championship List:**
-    ```
-    **125th WPGA Amateur Championship - Qualifying**
-    **Tee Sheet**
-    **Thu, May 8 - Wed, Jun 4, 2025**
-    Montour Heights Country Club
-    ```
-    
-    **Format 3 - Tabular List:**
-    ```
-    Date    Tournaments    Info    Tournament Types    Favorite    Results
-    Apr 13  
-        SilverRock  About
-        SilverRock Resort    ·    
-        La Quinta, CA
-    ```
-    
-    **Format 4 - List with Date Ranges:**
-    ```
-    Tournament Name
-    Course Name
-    City, State
-    May 16, 2025 - May 18, 2025
-    ```
-    
-    ### Required Columns:
-    
-    The app extracts these required columns:
-    - Date (tournament date) - for date ranges, it uses the first date
-    - Name (tournament name) - "About" suffix is automatically removed
-    - Course (golf course name)
-    - Category (tournament type/category) - Men's, Women's, Seniors, Amateur, or Junior's
-    - City (location city) - extracted from text when available
-    - State (location state, 2-letter code) - extracted from text or uses default
-    - Zip (5-digit zip code) - mostly left blank
-    """)
