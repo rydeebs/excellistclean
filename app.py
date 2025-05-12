@@ -59,36 +59,63 @@ def standardize_date(date_str, year="2025"):
     # If nothing else works, return original
     return date_str
 
-def standardize_state(state_str):
-    """Convert state names to two-letter abbreviations."""
-    if not state_str:
+def standardize_date(date_str, year="2025"):
+    """
+    Convert various date formats to YYYY-MM-DD format, always using the first date in a range.
+    This robust version handles dates in various formats and positions within text.
+    """
+    if not date_str:
         return None
-        
-    state_str = str(state_str).strip().upper()
+
+    date_str = str(date_str).strip()
     
-    # Dictionary of state names to abbreviations
-    state_dict = {
-        'ALABAMA': 'AL', 'ALASKA': 'AK', 'ARIZONA': 'AZ', 'ARKANSAS': 'AR',
-        'CALIFORNIA': 'CA', 'COLORADO': 'CO', 'CONNECTICUT': 'CT', 'DELAWARE': 'DE',
-        'FLORIDA': 'FL', 'GEORGIA': 'GA', 'HAWAII': 'HI', 'IDAHO': 'ID',
-        'ILLINOIS': 'IL', 'INDIANA': 'IN', 'IOWA': 'IA', 'KANSAS': 'KS',
-        'KENTUCKY': 'KY', 'LOUISIANA': 'LA', 'MAINE': 'ME', 'MARYLAND': 'MD',
-        'MASSACHUSETTS': 'MA', 'MICHIGAN': 'MI', 'MINNESOTA': 'MN', 'MISSISSIPPI': 'MS',
-        'MISSOURI': 'MO', 'MONTANA': 'MT', 'NEBRASKA': 'NE', 'NEVADA': 'NV',
-        'NEW HAMPSHIRE': 'NH', 'NEW JERSEY': 'NJ', 'NEW MEXICO': 'NM', 'NEW YORK': 'NY',
-        'NORTH CAROLINA': 'NC', 'NORTH DAKOTA': 'ND', 'OHIO': 'OH', 'OKLAHOMA': 'OK',
-        'OREGON': 'OR', 'PENNSYLVANIA': 'PA', 'RHODE ISLAND': 'RI', 'SOUTH CAROLINA': 'SC',
-        'SOUTH DAKOTA': 'SD', 'TENNESSEE': 'TN', 'TEXAS': 'TX', 'UTAH': 'UT',
-        'VERMONT': 'VT', 'VIRGINIA': 'VA', 'WASHINGTON': 'WA', 'WEST VIRGINIA': 'WV',
-        'WISCONSIN': 'WI', 'WYOMING': 'WY', 'DISTRICT OF COLUMBIA': 'DC'
-    }
+    # First, try to find a date with month, day, and year (with comma)
+    pattern1 = r'(January|February|March|April|May|June|July|August|September|October|November|December|Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+(\d{1,2}),\s+(\d{4})'
+    match1 = re.search(pattern1, date_str, re.IGNORECASE)
+    if match1:
+        month, day, yr = match1.groups()
+        # Convert month name to number
+        month_dict = {
+            'January': '01', 'Jan': '01', 'February': '02', 'Feb': '02', 'March': '03', 'Mar': '03',
+            'April': '04', 'Apr': '04', 'May': '05', 'June': '06', 'Jun': '06', 'July': '07', 
+            'Jul': '07', 'August': '08', 'Aug': '08', 'September': '09', 'Sep': '09', 
+            'October': '10', 'Oct': '10', 'November': '11', 'Nov': '11', 'December': '12', 'Dec': '12'
+        }
+        month_num = month_dict.get(month.capitalize(), '01')
+        day_padded = day.zfill(2)
+        return f"{yr}-{month_num}-{day_padded}"
     
-    # If already an abbreviation
-    if len(state_str) == 2:
-        return state_str
+    # If that doesn't work, try just month and day
+    pattern2 = r'(January|February|March|April|May|June|July|August|September|October|November|December|Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+(\d{1,2})'
+    match2 = re.search(pattern2, date_str, re.IGNORECASE)
+    if match2:
+        month, day = match2.groups()
+        # Convert month name to number
+        month_dict = {
+            'January': '01', 'Jan': '01', 'February': '02', 'Feb': '02', 'March': '03', 'Mar': '03',
+            'April': '04', 'Apr': '04', 'May': '05', 'June': '06', 'Jun': '06', 'July': '07', 
+            'Jul': '07', 'August': '08', 'Aug': '08', 'September': '09', 'Sep': '09', 
+            'October': '10', 'Oct': '10', 'November': '11', 'Nov': '11', 'December': '12', 'Dec': '12'
+        }
+        month_num = month_dict.get(month.capitalize(), '01')
+        day_padded = day.zfill(2)
+        return f"{year}-{month_num}-{day_padded}"
     
-    # If it's a full state name
-    return state_dict.get(state_str, state_str)
+    # Try different date formats as a fallback
+    date_formats = [
+        '%m/%d/%Y', '%m-%d-%Y', '%Y-%m-%d', '%Y/%m/%d',
+        '%m/%d/%y', '%m-%d-%y', '%d/%m/%Y', '%d-%m-%Y',
+        '%B %d, %Y', '%b %d, %Y'
+    ]
+    
+    for fmt in date_formats:
+        try:
+            return datetime.strptime(date_str, fmt).strftime('%Y-%m-%d')
+        except ValueError:
+            continue
+    
+    # If nothing else works, return None instead of the original string
+    return None
 
 def detect_format(text):
     """Detect which format the text is in."""
@@ -146,7 +173,10 @@ def parse_tournament_text(text):
         return parse_simple_format(text)
 
 def parse_list_format(text):
-    """Parse the list format with tournament name, course, location, and date range."""
+    """
+    Parse the list format with tournament name, course, location, and date range.
+    This fixed version ensures dates are correctly extracted and processed.
+    """
     lines = [line.strip() for line in text.split('\n') if line.strip()]
     
     tournaments = []
@@ -160,7 +190,7 @@ def parse_list_format(text):
         # Assume pattern: Tournament Name, Course, Location, Date Range
         tournament_name = lines[i]
         
-        # Skip to next entry if this doesn't look like a tournament name
+        # Skip to next entry if this line looks like a date
         if re.match(r'^(January|February|March|April|May|June|July|August|September|October|November|December|Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)', tournament_name):
             i += 1
             continue
@@ -175,13 +205,18 @@ def parse_list_format(text):
             city = location_match.group(1) if location_match else ""
             state = location_match.group(2) if location_match else ""
             
-            # Check if the next line is a date range
-            date_match = re.search(r'(January|February|March|April|May|June|July|August|September|October|November|December|Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d{1,2}', date_line)
+            # Check for ANY date pattern in the date line, not just at the beginning
+            date_pattern = r'(January|February|March|April|May|June|July|August|September|October|November|December|Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d{1,2}'
+            date_match = re.search(date_pattern, date_line, re.IGNORECASE)
             
+            # If date found, create tournament entry
             if date_match:
-                # Create tournament entry
+                # Process the date here
+                date_value = standardize_date(date_line)
+                
+                # Create tournament entry with the extracted date
                 tournament = {
-                    'Date': standardize_date(date_line),
+                    'Date': date_value, 
                     'Name': tournament_name.strip(),
                     'Course': course_name.strip(),
                     'Category': "Men's",  # Default category
@@ -201,12 +236,13 @@ def parse_list_format(text):
                 elif "Junior" in name or "Boys'" in name or "Girls'" in name:
                     tournament['Category'] = "Junior's"
                 
+                # Add the tournament to our list
                 tournaments.append(tournament)
                 
                 # Move to next entry (skip the 4 lines we just processed)
                 i += 4
             else:
-                # Not a valid entry, move to next line
+                # Not a valid date line, move to next line
                 i += 1
         else:
             # Not enough lines left, move to next line
