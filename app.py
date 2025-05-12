@@ -823,7 +823,7 @@ def parse_tabular_format(text):
                     i = j
                     break
                 j += 1
-                
+            
             # Add the tournament if we have at least a name
             if tournament_data['Name']:
                 # Determine category based on tournament name
@@ -838,10 +838,10 @@ def parse_tabular_format(text):
                     tournament_data['Category'] = "Junior's"
                 
                 tournaments.append(tournament_data)
-                
+            
             if j >= len(lines):
                 break
-                        else:
+        else:
             i += 1
     
     # Convert to DataFrame
@@ -852,9 +852,9 @@ def parse_tabular_format(text):
         for col in REQUIRED_COLUMNS:
             if col not in tournaments_df.columns:
                 tournaments_df[col] = None
-                
+        
         return tournaments_df
-                    else:
+    else:
         # Return empty DataFrame with all required columns
         return pd.DataFrame(columns=REQUIRED_COLUMNS)
 
