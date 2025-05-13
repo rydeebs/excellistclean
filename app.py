@@ -635,157 +635,151 @@ def parse_championship_table_format(text):
     tournaments = []
     
     # Skip header lines (like "GROSS", "CHAMPIONSHIPS SITE DATES")
-    i = 0
-    while i < len(lines) and ("CHAMPIONSHIPS" in lines[i].upper() or "GROSS" in lines[i].upper() or len(lines[i]) < 5):
-        i += 1
+    start_index = 0
+    for i, line in enumerate(lines):
+        if "CHAMPIONSHIPS" in line.upper() and "SITE" in line.upper() and "DATES" in line.upper():
+            start_index = i + 1
+            break
+    
+    # If no header found, try to start from beginning
+    if start_index == 0 and len(lines) > 1:
+        start_index = 1  # Skip first line which might be a header
+    
+    # Keep track of continued lines
+    continued_tournament = None
     
     # Process tournament lines
+    i = start_index
     while i < len(lines):
         line = lines[i]
         i += 1
         
-        # Skip very short lines
-        if len(line) < 5:
+        # Skip very short lines or likely headers
+        if len(line) < 5 or (line.isupper() and len(line.split()) <= 3):
+            continued_tournament = None  # Reset continuation
             continue
         
-        try:
-            # For this format, we're looking for date patterns at the end of the line
-            # Common patterns: 3/3 - 3/4, 4/28 - 30, 5/29 (single date)
-            date_match = re.search(r'(\d{1,2}/\d{1,2})(?:\s*-\s*\d{1,2}(?:/\d{1,2})?)?$', line)
+        # Check if this line has a date pattern
+        date_match = re.search(r'(\d{1,2}/\d{1,2})(?:\s*-\s*(?:\d{1,2}/\d{1,2}|\d{1,2}))?$', line)
+        
+        if date_match:
+            # This is a line with a tournament entry
+            date_text = date_match.group(0)
+            line_before_date = line[:date_match.start()].strip()
             
-            if not date_match:
-                # Try another format: Month/Day - Month/Day
-                month_names = ["January", "February", "March", "April", "May", "June", "July", "August", 
-                          "September", "October", "November", "December", "Jan", "Feb", "Mar", 
-                          "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
-                
-                for month in month_names:
-                    month_pattern = r'(' + month + r'\s+\d{1,2})(?:\s*-\s*(?:' + month + r')?\s*\d{1,2})?$'
-                    date_match = re.search(month_pattern, line, re.IGNORECASE)
-                    if date_match:
-                        break
+            # Try to split into tournament name and course
+            # First check if there are clear course indicators
+            course_indicators = ["GC", "CC", "Golf", "Club", "Course", "Pines", "Ranch", 
+                                 "Park", "Hills", "Valley", "Creek", "Springs", "Resort"]
             
-            if not date_match:
-                # If no date format found, try to see if it continues on next line
-                if i < len(lines) and not re.match(r'^[A-Za-z]', lines[i]):
-                    # Next line doesn't start with a letter, might be continuation
-                    line += " " + lines[i]
-                    i += 1
-                    
-                    # Try again with the combined line
-                    date_match = re.search(r'(\d{1,2}/\d{1,2})(?:\s*-\s*\d{1,2}(?:/\d{1,2})?)?$', line)
+            course_name = ""
+            tournament_name = ""
             
-            if date_match:
-                # We found a date at the end, now extract the parts
+            # Find the last course indicator position
+            last_indicator_pos = -1
+            for indicator in course_indicators:
+                pos = line_before_date.rfind(indicator)
+                if pos > last_indicator_pos:
+                    last_indicator_pos = pos
+            
+            if last_indicator_pos > 0:
+                # Search backwards from the indicator to find likely start of course name
+                # Look for capital letter preceded by space
+                course_start = last_indicator_pos
+                while course_start > 0 and not (line_before_date[course_start-1].isspace() and 
+                                               line_before_date[course_start].isupper()):
+                    course_start -= 1
                 
-                # Get the date text
-                date_text = date_match.group(0)
-                
-                # Remove date from the line to process the rest
-                line_without_date = line[:date_match.start()].strip()
-                
-                # Extract course name - typically the last part before the date
-                # Look for golf course indicators
-                course_indicators = ["GC", "CC", "Golf", "Club", "Course", "Pines", 
-                                     "Ranch", "Park", "Hills", "Valley", "Creek", "Springs"]
-                
-                course_name = ""
-                name = ""
-                
-                # Try to find the course name by looking for course indicators
-                for indicator in course_indicators:
-                    if indicator in line_without_date:
-                        # Find the position of the indicator
-                        pos = line_without_date.rfind(indicator)
-                        
-                        # Look for the start of the course name
-                        # Go backwards from indicator to find where course name likely starts
-                        start_pos = pos
-                        while start_pos > 0 and not line_without_date[start_pos-1].isdigit() and line_without_date[start_pos-1] != '*':
-                            start_pos -= 1
-                        
-                        # Extract course name - from potential start to end of indicator
-                        course_candidate = line_without_date[start_pos:pos+len(indicator)].strip()
-                        
-                        # Keep the longest valid course name
-                        if len(course_candidate) > len(course_name) and len(course_candidate) < len(line_without_date) - 5:
-                            course_name = course_candidate
-                
-                # If course name could not be identified, try splitting the line
-                if not course_name:
-                    # Split the line at a reasonable point (around 60% of the way through)
-                    split_point = int(len(line_without_date) * 0.6)
-                    name = line_without_date[:split_point].strip()
-                    course_name = line_without_date[split_point:].strip()
+                # If we couldn't find a clear boundary, use word boundary
+                if course_start == 0:
+                    words = line_before_date.split()
+                    for j in range(len(words)-1, -1, -1):
+                        if any(indicator in words[j] for indicator in course_indicators):
+                            # Count backwards to include a reasonable course name
+                            course_words = words[max(0, j-3):j+1]
+                            tournament_words = words[:max(0, j-3)]
+                            
+                            course_name = " ".join(course_words)
+                            tournament_name = " ".join(tournament_words)
+                            break
                 else:
-                    # Tournament name is what remains after removing course name
-                    name = line_without_date.replace(course_name, "").strip()
+                    # Extract course and tournament names
+                    course_name = line_before_date[course_start:].strip()
+                    tournament_name = line_before_date[:course_start].strip()
+            else:
+                # No clear course indicators, try a simple split
+                words = line_before_date.split()
+                mid_point = len(words) // 2
+                tournament_name = " ".join(words[:mid_point])
+                course_name = " ".join(words[mid_point:])
+            
+            # Check for continuation from previous line
+            if continued_tournament and (not tournament_name or len(tournament_name.split()) <= 1):
+                tournament_name = continued_tournament
+            
+            # If course name is very short or empty, check next line for continuation
+            if len(course_name.split()) <= 1 and i < len(lines):
+                next_line = lines[i]
+                if not re.search(r'\d{1,2}/\d{1,2}', next_line) and len(next_line) > 3:
+                    # Next line looks like a continuation
+                    course_name += " " + next_line
+                    i += 1  # Skip this line in next iteration
+            
+            # Format the date - for M/D format, convert to YYYY-MM-DD
+            date_value = None
+            if '/' in date_text:
+                # For M/D format like 3/3 - 3/4
+                month, day = date_text.split('/')[0], date_text.split('/')[1].split(' ')[0]
+                date_value = f"{year}-{month.zfill(2)}-{day.zfill(2)}"
+            else:
+                # For month name format
+                date_value = ultra_simple_date_extractor(date_text, year)
+            
+            if date_value and (tournament_name or continued_tournament) and course_name:
+                # Create tournament entry
+                final_name = tournament_name if tournament_name else continued_tournament
                 
-                # Handle continued lines for name or course
-                if not name or len(name) < 3:
-                    if i > 1 and not re.search(r'\d{1,2}/\d{1,2}', lines[i-2]):
-                        # Previous line might be part of the name
-                        name = lines[i-2].strip() + " " + name
+                tournament = {
+                    'Date': date_value,
+                    'Name': final_name.strip(),
+                    'Course': course_name.strip(),
+                    'Category': "Men's",  # Default category
+                    'Gender': determine_gender(final_name),
+                    'City': None,  # No city info in this format
+                    'State': default_state if default_state else None,
+                    'Zip': None
+                }
                 
-                # Clean up course name (remove trailing asterisks, etc.)
-                course_name = re.sub(r'\s+\*+$', "", course_name).strip()
+                # Determine category based on tournament name
+                name_lower = final_name.lower()
+                if "amateur" in name_lower and "junior" not in name_lower:
+                    tournament['Category'] = "Amateur"
+                elif "senior" in name_lower and "super" not in name_lower:
+                    tournament['Category'] = "Seniors"
+                elif "super senior" in name_lower:
+                    tournament['Category'] = "Super Senior"
+                elif "women" in name_lower or "ladies" in name_lower or "girls" in name_lower:
+                    tournament['Category'] = "Women's"
+                elif "junior" in name_lower or "boys" in name_lower or "high school" in name_lower:
+                    tournament['Category'] = "Junior's"
+                elif "mid-amateur" in name_lower:
+                    tournament['Category'] = "Mid-Amateur"
+                elif "four-ball" in name_lower:
+                    tournament['Category'] = "Four-Ball"
+                elif "mixed" in name_lower or ("men" in name_lower and "women" in name_lower):
+                    tournament['Category'] = "Mixed/Couples"
                 
-                # Clean up name (remove trailing asterisks, etc.)
-                name = re.sub(r'\s+\*+$', "", name).strip()
-                
-                # Handle multi-line course names
-                if "at" in course_name and len(course_name.split()) <= 3:
-                    if i < len(lines) and not re.search(r'\d{1,2}/\d{1,2}', lines[i]):
-                        # Next line might be continuation of course name
-                        course_name += " " + lines[i].strip()
-                        i += 1
-                
-                # Format the date - for M/D format, convert to YYYY-MM-DD
-                date_value = None
-                if '/' in date_text:
-                    # For M/D format like 3/3 - 3/4
-                    month, day = date_text.split('/')[0], date_text.split('/')[1].split(' ')[0]
-                    date_value = f"{year}-{month.zfill(2)}-{day.zfill(2)}"
-                else:
-                    # For month name format
-                    date_value = ultra_simple_date_extractor(date_text, year)
-                
-                if date_value and name and course_name:
-                    # Create tournament entry
-                    tournament = {
-                        'Date': date_value,
-                        'Name': name.strip(),
-                        'Course': course_name.strip(),
-                        'Category': "Men's",  # Default category
-                        'Gender': determine_gender(name),
-                        'City': None,  # No city info in this format
-                        'State': default_state if default_state else None,
-                        'Zip': None
-                    }
-                    
-                    # Determine category based on tournament name
-                    name_lower = name.lower()
-                    if "amateur" in name_lower and "junior" not in name_lower:
-                        tournament['Category'] = "Amateur"
-                    elif "senior" in name_lower and "super" not in name_lower:
-                        tournament['Category'] = "Seniors"
-                    elif "super senior" in name_lower:
-                        tournament['Category'] = "Super Senior"
-                    elif "women" in name_lower or "ladies" in name_lower or "girls" in name_lower:
-                        tournament['Category'] = "Women's"
-                    elif "junior" in name_lower or "boys" in name_lower or "high school" in name_lower:
-                        tournament['Category'] = "Junior's"
-                    elif "mid-amateur" in name_lower:
-                        tournament['Category'] = "Mid-Amateur"
-                    elif "four-ball" in name_lower:
-                        tournament['Category'] = "Four-Ball"
-                    elif "mixed" in name_lower or ("men" in name_lower and "women" in name_lower):
-                        tournament['Category'] = "Mixed/Couples"
-                    
-                    tournaments.append(tournament)
-        except Exception as e:
-            st.write(f"Error parsing line: {line}. Error: {str(e)}")
-            continue
+                tournaments.append(tournament)
+                continued_tournament = None  # Reset continuation
+        else:
+            # This line doesn't have a date, might be a continuation or a tournament name
+            # Check if it looks like a tournament name (starts with capital letter)
+            if line and line[0].isupper():
+                # Might be a tournament name for next line
+                continued_tournament = line
+            else:
+                # Might be continuation of previous tournament/course
+                continued_tournament = None
     
     # Convert to DataFrame
     if tournaments:
@@ -807,17 +801,33 @@ def detect_format(text):
     """Detect which format the text is in."""
     # Split the text into lines and check for patterns
     lines = [line.strip() for line in text.split('\n')]
-
-     # Check for championship table format
-    if "CHAMPIONSHIPS" in text.upper() and "SITE" in text.upper() and "DATES" in text.upper():
-        # Look for date patterns like 3/3 - 3/4
+    
+    # Check for championship table format with CHAMPIONSHIPS SITE DATES header
+    championship_header = False
+    for line in lines:
+        if "CHAMPIONSHIPS" in line.upper() and "SITE" in line.upper() and "DATES" in line.upper():
+            championship_header = True
+            break
+    
+    if championship_header:
+        # Check for date patterns like 3/3 - 3/4
         date_pattern_count = 0
         for line in lines:
-            if re.search(r'\d{1,2}/\d{1,2}(?:\s*-\s*\d{1,2}(?:/\d{1,2})?)?$', line):
+            if re.search(r'\d{1,2}/\d{1,2}(?:\s*-\s*(?:\d{1,2}/\d{1,2}|\d{1,2}))?$', line):
                 date_pattern_count += 1
         
         if date_pattern_count >= 3:
             return "CHAMPIONSHIP_TABLE_FORMAT"
+    
+    # Alternative check for championship table format without explicit header
+    # Look for consistent date patterns at the end of lines
+    date_pattern_lines = 0
+    for line in lines:
+        if re.search(r'\d{1,2}/\d{1,2}(?:\s*-\s*(?:\d{1,2}/\d{1,2}|\d{1,2}))?$', line):
+            date_pattern_lines += 1
+    
+    if date_pattern_lines >= 5 and date_pattern_lines > len(lines) * 0.25:
+        return "CHAMPIONSHIP_TABLE_FORMAT"
     
     # Check for four-line format (name, course, location, date)
     four_line_pattern_count = 0
