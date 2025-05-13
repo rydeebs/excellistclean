@@ -969,65 +969,94 @@ def parse_entries_close_format(text):
 
 def parse_simple_date_club_city_format(text):
     """
-    Parse format with Date, Club, City columns.
+    Parse format with Date, Club, City columns (often used for qualifiers).
     Example:
-    Date    Club    City
-    May 5, 2025    The Providence Golf Club    Davenport
+    May 18, 2025    Sandestin Resort & Club - Raven Course    Sandestin
     """
     lines = [line.strip() for line in text.split('\n') if line.strip()]
     
-    # Check if first line looks like headers
-    if len(lines) > 1 and "Date" in lines[0] and "Club" in lines[0] and "City" in lines[0]:
-        # Skip the header line
+    # Check if first line looks like headers and skip it
+    if len(lines) > 1 and ("Date" in lines[0] and "Club" in lines[0] and "City" in lines[0]):
         lines = lines[1:]
     
     tournaments = []
     
     for line in lines:
+        # Skip very short lines
+        if len(line) < 10:
+            continue
+            
         # Split by tabs or multiple spaces
         parts = re.split(r'\t+|\s{2,}', line)
         
-        # Need at least 3 parts: Date, Club, City
-        if len(parts) >= 3:
+        # If we couldn't split properly, try another approach
+        if len(parts) < 3:
+            # Try to extract date, which typically has a consistent format
+            date_match = re.match(r'(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+\d{1,2},\s+\d{4}', line)
+            if date_match:
+                date_text = date_match.group(0)
+                rest_of_line = line[len(date_text):].strip()
+                
+                # Try to find the city (typically the last word)
+                words = rest_of_line.split()
+                city_name = words[-1] if len(words) > 1 else ""
+                
+                # Course name is everything between date and city
+                club_name = rest_of_line[:-len(city_name)].strip() if city_name else rest_of_line
+            else:
+                # If we can't find a date, skip this line
+                continue
+        else:
+            # We successfully split the line
             date_text = parts[0].strip()
             club_name = parts[1].strip()
-            city_name = parts[2].strip()
-            
-            # Process the date
-            date_value = ultra_simple_date_extractor(date_text, year)
-            
-            # For state, try to extract from the city or use default
-            state = ""
-            
-            # Check if the city includes a state code
-            city_state_match = re.search(r'(.*?),\s+([A-Z]{2})$', city_name)
-            if city_state_match:
-                city_name = city_state_match.group(1).strip()
-                state = city_state_match.group(2).strip()
+            city_name = parts[2].strip() if len(parts) > 2 else ""
+        
+        # Process the date
+        date_value = ultra_simple_date_extractor(date_text, year)
+        
+        # For state, try to extract from the city or use default
+        state = ""
+        
+        # Check if the city includes a state code
+        city_state_match = re.search(r'(.*?),\s+([A-Z]{2})$', city_name)
+        if city_state_match:
+            city_name = city_state_match.group(1).strip()
+            state = city_state_match.group(2).strip()
+        else:
+            # Use default state if provided
+            state = default_state if default_state else ""
+        
+        if date_value:
+            # Create a descriptive name for the qualifier based on course
+            if "qualifier" in text.lower() or "qualifying" in text.lower():
+                tournament_name = f"Qualifier at {club_name}"
             else:
-                # Use default state if provided
-                state = default_state if default_state else ""
+                tournament_name = f"Golf Tournament at {club_name}"
             
-            if date_value:
-                # Create tournament entry
-                tournament = {
-                    'Date': date_value,
-                    'Name': f"Golf Tournament at {club_name}",  # Generate a name since none is provided
-                    'Course': club_name,
-                    'Category': "Men's",  # Default category
-                    'Gender': "Men's",  # Default gender
-                    'City': city_name,
-                    'State': state,
-                    'Zip': None
-                }
-                
-                # Try to determine category from club name
-                name = club_name.lower()
-                if "women" in name or "ladies" in name:
-                    tournament['Category'] = "Women's"
-                    tournament['Gender'] = "Women's"
-                
-                tournaments.append(tournament)
+            # Create tournament entry
+            tournament = {
+                'Date': date_value,
+                'Name': tournament_name,
+                'Course': club_name,
+                'Category': "Men's",  # Default category
+                'Gender': "Men's",  # Default gender
+                'City': city_name,
+                'State': state,
+                'Zip': None
+            }
+            
+            # Try to determine category from club name or context
+            club_lower = club_name.lower()
+            if "women" in club_lower or "ladies" in club_lower:
+                tournament['Category'] = "Women's"
+                tournament['Gender'] = "Women's"
+            elif "senior" in club_lower:
+                tournament['Category'] = "Seniors"
+            elif "junior" in club_lower:
+                tournament['Category'] = "Junior's"
+            
+            tournaments.append(tournament)
     
     # Convert to DataFrame
     if tournaments:
