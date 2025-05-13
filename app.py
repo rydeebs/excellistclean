@@ -521,10 +521,151 @@ def parse_usga_qualifier_expanded_format(text):
         # Return empty DataFrame with all required columns
         return pd.DataFrame(columns=REQUIRED_COLUMNS)
 
+def parse_four_line_format(text):
+    """
+    Parse format with tournament details on four separate lines:
+    Line 1: Tournament name
+    Line 2: Course name
+    Line 3: City, State
+    Line 4: Date
+    
+    Tournaments are separated by blank lines.
+    """
+    # Split the text into lines
+    lines = [line.strip() for line in text.split('\n')]
+    
+    tournaments = []
+    i = 0
+    
+    while i < len(lines):
+        # Skip blank lines
+        if not lines[i]:
+            i += 1
+            continue
+        
+        # Check if we have at least 4 more lines (name, course, location, date)
+        if i + 3 < len(lines):
+            tournament_name = lines[i]
+            course_name = lines[i+1]
+            location = lines[i+2]
+            date_line = lines[i+3]
+            
+            # Make sure we have actual content in each line
+            if tournament_name and course_name and location and date_line:
+                # Parse location for city and state
+                location_match = re.search(r'(.*?),\s+([A-Z]{2})', location)
+                city = ""
+                state = ""
+                if location_match:
+                    city = location_match.group(1).strip()
+                    state = location_match.group(2).strip()
+                else:
+                    # If no match, use default state if provided
+                    state = default_state if default_state else ""
+                
+                # Extract date
+                date_value = ultra_simple_date_extractor(date_line, year)
+                
+                if date_value:
+                    # Create tournament entry
+                    tournament = {
+                        'Date': date_value,
+                        'Name': tournament_name.strip(),
+                        'Course': course_name.strip(),
+                        'Category': "Men's",  # Default category
+                        'Gender': determine_gender(tournament_name),
+                        'City': city,
+                        'State': state,
+                        'Zip': None
+                    }
+                    
+                    # Determine category based on tournament name
+                    name = tournament_name.lower()
+                    if "amateur" in name:
+                        tournament['Category'] = "Amateur"
+                    elif "senior" in name:
+                        tournament['Category'] = "Seniors"
+                    elif "women" in name or "ladies" in name:
+                        tournament['Category'] = "Women's"
+                    elif "junior" in name or "boys" in name or "girls" in name:
+                        tournament['Category'] = "Junior's"
+                    elif "mid-amateur" in name:
+                        tournament['Category'] = "Mid-Amateur"
+                    elif "four-ball" in name:
+                        tournament['Category'] = "Four-Ball"
+                    elif "father" in name and "son" in name:
+                        tournament['Category'] = "Mixed/Couples"
+                    
+                    tournaments.append(tournament)
+            
+            # Move to the next block (skip the 4 lines we just processed)
+            i += 4
+        else:
+            # Not enough lines left to form a complete entry
+            break
+    
+    # Convert to DataFrame
+    if tournaments:
+        st.write(f"Debug: Found {len(tournaments)} tournaments in four-line format")
+        
+        tournaments_df = pd.DataFrame(tournaments)
+        
+        # Ensure all required columns exist
+        for col in REQUIRED_COLUMNS:
+            if col not in tournaments_df.columns:
+                tournaments_df[col] = None
+                
+        return tournaments_df
+    else:
+        # Return empty DataFrame with all required columns
+        return pd.DataFrame(columns=REQUIRED_COLUMNS)
+
 def detect_format(text):
     """Detect which format the text is in."""
     # Split the text into lines and check for patterns
-    lines = [line.strip() for line in text.split('\n') if line.strip()]
+    lines = [line.strip() for line in text.split('\n')]
+    
+    # Check for four-line format (name, course, location, date)
+    four_line_pattern_count = 0
+    i = 0
+    
+    while i < len(lines):
+        # Skip blank lines
+        if not lines[i]:
+            i += 1
+            continue
+            
+        # Check if we have 4 non-empty lines followed by a blank line or end of text
+        if (i + 3 < len(lines) and 
+            all(lines[i+j] for j in range(4)) and  # All 4 lines have content
+            (i + 4 >= len(lines) or not lines[i+4])):  # Followed by blank line or end
+            
+            # Check if 3rd line looks like a location (City, ST)
+            if re.search(r'.*?,\s+[A-Z]{2}', lines[i+2]):
+                # Check if 4th line looks like a date
+                date_line = lines[i+3]
+                month_names = ["January", "February", "March", "April", "May", "June", "July", "August", 
+                              "September", "October", "November", "December", "Jan", "Feb", "Mar", 
+                              "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+                if any(month in date_line for month in month_names):
+                    four_line_pattern_count += 1
+            
+            # Skip ahead to the next block
+            i += 5
+        else:
+            i += 1
+    
+    if four_line_pattern_count >= 2:
+        return "FOUR_LINE_FORMAT"
+    
+    # Check for bulleted markdown format (with * and ** and *)
+    bulleted_markdown_count = 0
+    for line in lines:
+        if line.strip().startswith('*') and '**' in line and '*' in line.replace('**', ''):
+            bulleted_markdown_count += 1
+    
+    if bulleted_markdown_count >= 3:
+        return "BULLETED_MARKDOWN_FORMAT"
     
     # Check for schedule format with dates followed by event name on same line
     month_names = ["January", "February", "March", "April", "May", "June", "July", "August", 
@@ -534,7 +675,7 @@ def detect_format(text):
     
     schedule_format_count = 0
     for line in lines:
-        if re.match(date_prefix_pattern, line) and len(line) > 20:
+        if re.match(date_prefix_pattern, line.strip()) and len(line) > 20:
             schedule_format_count += 1
     
     if schedule_format_count >= 3:
@@ -1332,7 +1473,11 @@ def parse_tournament_text(text):
     format_type = detect_format(text)
     st.write(f"Detected format: {format_type}")
     
-    if format_type == "SCHEDULE_FORMAT":
+    if format_type == "FOUR_LINE_FORMAT":
+        return parse_four_line_format(text)
+    elif format_type == "BULLETED_MARKDOWN_FORMAT":
+        return parse_bulleted_markdown_format(text)
+    elif format_type == "SCHEDULE_FORMAT":
         return parse_schedule_format(text)
     elif format_type == "USGA_QUALIFIER_EXPANDED_FORMAT":
         return parse_usga_qualifier_expanded_format(text)
