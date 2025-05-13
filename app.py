@@ -1028,30 +1028,17 @@ def parse_simple_date_club_city_format(text):
             state = default_state if default_state else ""
         
         if date_value:
-            # Leave name blank as requested
-            tournament_name = ""
-            
-            # Create tournament entry
+            # Create tournament entry with empty name
             tournament = {
                 'Date': date_value,
-                'Name': tournament_name,
+                'Name': None,  # Explicitly set to None
                 'Course': club_name,
-                'Category': "Men's",  # Default category
-                'Gender': "Men's",  # Default gender
                 'City': city_name,
                 'State': state,
+                'Category': None,  # Don't set a category since we don't have a name
+                'Gender': None,    # Don't set a gender since we don't have a name
                 'Zip': None
             }
-            
-            # Try to determine category from club name or context
-            club_lower = club_name.lower()
-            if "women" in club_lower or "ladies" in club_lower:
-                tournament['Category'] = "Women's"
-                tournament['Gender'] = "Women's"
-            elif "senior" in club_lower:
-                tournament['Category'] = "Seniors"
-            elif "junior" in club_lower:
-                tournament['Category'] = "Junior's"
             
             tournaments.append(tournament)
     
@@ -1061,7 +1048,7 @@ def parse_simple_date_club_city_format(text):
         
         tournaments_df = pd.DataFrame(tournaments)
         
-        # Ensure all required columns exist
+        # Ensure all required columns exist but leave Name, Category, and Gender as None
         for col in REQUIRED_COLUMNS:
             if col not in tournaments_df.columns:
                 tournaments_df[col] = None
