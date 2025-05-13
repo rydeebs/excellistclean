@@ -985,73 +985,100 @@ def parse_simple_date_club_city_format(text):
         # Skip very short lines
         if len(line) < 10:
             continue
-            
-        # Split by tabs or multiple spaces
-        parts = re.split(r'\t+|\s{2,}', line)
         
-        # If we couldn't split properly, try another approach
-        if len(parts) < 3:
-            # Try to extract date, which typically has a consistent format
-            date_match = re.match(r'(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+\d{1,2},\s+\d{4}', line)
-            if date_match:
-                date_text = date_match.group(0)
-                rest_of_line = line[len(date_text):].strip()
-                
-                # Try to find the city (typically the last word)
-                words = rest_of_line.split()
-                city_name = words[-1] if len(words) > 1 else ""
-                
-                # Course name is everything between date and city
-                club_name = rest_of_line[:-len(city_name)].strip() if city_name else rest_of_line
+        # Try to match a consistent pattern:
+        # Date (May 18, 2025), followed by Course, followed by City
+        date_pattern = r'((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+\d{1,2},\s+\d{4})'
+        date_match = re.match(date_pattern, line)
+        
+        if date_match:
+            date_text = date_match.group(1)
+            # Remove the date part from the line
+            remaining_text = line[len(date_text):].strip()
+            
+            # First try to see if we can split by tabs
+            tab_parts = remaining_text.split('\t')
+            
+            if len(tab_parts) >= 2:
+                # Split by tabs worked
+                course_name = tab_parts[0].strip()
+                city_name = tab_parts[1].strip()
             else:
-                # If we can't find a date, skip this line
-                continue
-        else:
-            # We successfully split the line
-            date_text = parts[0].strip()
-            club_name = parts[1].strip()
-            city_name = parts[2].strip() if len(parts) > 2 else ""
-        
-        # Process the date
-        date_value = ultra_simple_date_extractor(date_text, year)
-        
-        # For state, try to extract from the city or use default
-        state = ""
-        
-        # Check if the city includes a state code
-        city_state_match = re.search(r'(.*?),\s+([A-Z]{2})$', city_name)
-        if city_state_match:
-            city_name = city_state_match.group(1).strip()
-            state = city_state_match.group(2).strip()
-        else:
-            # Use default state if provided
-            state = default_state if default_state else ""
-        
-        if date_value:
-            # Create tournament entry with empty name
-            tournament = {
-                'Date': date_value,
-                'Name': None,  # Explicitly set to None
-                'Course': club_name,
-                'City': city_name,
-                'State': state,
-                'Category': None,  # Don't set a category since we don't have a name
-                'Gender': None,    # Don't set a gender since we don't have a name
-                'Zip': None
-            }
+                # Try to find the last 1-2 words which are likely the city
+                words = remaining_text.split()
+                if len(words) <= 2:
+                    # Not enough words to separate course and city
+                    course_name = remaining_text
+                    city_name = ""
+                else:
+                    # Assume the last word is the city
+                    city_name = words[-1]
+                    # And everything else is the course
+                    course_name = " ".join(words[:-1])
+                    
+                    # If the city name is very short, it might include the previous word too
+                    if len(city_name) <= 3 and len(words) > 2:
+                        city_name = words[-2] + " " + words[-1]
+                        course_name = " ".join(words[:-2])
             
-            tournaments.append(tournament)
-    
+            # Process the date
+            date_value = ultra_simple_date_extractor(date_text, year)
+            
+            # Check if city includes "Golf Club" or similar which suggests incorrect parsing
+            golf_terms = ["Golf", "Club", "Course", "Resort", "CC", "GC", "G&CC"]
+            if any(term in city_name for term in golf_terms):
+                # Parsing error - city contains golf terms
+                # Try a different approach - check if line has any common city names
+                common_cities = ["Orlando", "Tampa", "Miami", "Jacksonville", "Tallahassee", 
+                                "Naples", "Fort Lauderdale", "Palm Beach", "Daytona", "Sandestin",
+                                "Port Orange", "St. Augustine", "Gainesville", "Port St. Lucie"]
+                
+                city_found = False
+                for city in common_cities:
+                    if city in remaining_text:
+                        city_pos = remaining_text.find(city)
+                        city_name = city
+                        course_name = remaining_text[:city_pos].strip()
+                        city_found = True
+                        break
+                
+                if not city_found:
+                    # Last resort - just leave the city blank
+                    course_name = remaining_text
+                    city_name = ""
+            
+            # For state, use default state if provided
+            state = default_state if default_state else ""
+            
+            if date_value:
+                # Create tournament entry with empty name
+                tournament = {
+                    'Date': date_value,
+                    'Name': "",  # Empty string instead of None
+                    'Course': course_name.strip(),
+                    'City': city_name.strip(),
+                    'State': state,
+                    'Category': "",  # Empty string
+                    'Gender': "",    # Empty string
+                    'Zip': None
+                }
+                
+                tournaments.append(tournament)
+        
     # Convert to DataFrame
     if tournaments:
         st.write(f"Debug: Found {len(tournaments)} tournaments in simple tabular format")
         
+        # Convert to DataFrame with explicit empty strings for text columns
         tournaments_df = pd.DataFrame(tournaments)
         
-        # Ensure all required columns exist but leave Name, Category, and Gender as None
+        # Ensure all required columns exist
         for col in REQUIRED_COLUMNS:
             if col not in tournaments_df.columns:
                 tournaments_df[col] = None
+            elif col in ['Name', 'Category', 'Gender']:
+                # Use empty strings explicitly for these columns
+                tournaments_df[col] = ""
                 
         return tournaments_df
     else:
