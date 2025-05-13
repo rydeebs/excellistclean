@@ -1028,11 +1028,8 @@ def parse_simple_date_club_city_format(text):
             state = default_state if default_state else ""
         
         if date_value:
-            # Create a descriptive name for the qualifier based on course
-            if "qualifier" in text.lower() or "qualifying" in text.lower():
-                tournament_name = f"Qualifier at {club_name}"
-            else:
-                tournament_name = f"Golf Tournament at {club_name}"
+            # Leave name blank as requested
+            tournament_name = ""
             
             # Create tournament entry
             tournament = {
