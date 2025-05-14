@@ -1069,6 +1069,173 @@ def parse_simple_date_club_city_format(text):
         empty_df = pd.DataFrame(columns=REQUIRED_COLUMNS)
         return empty_df
     
+def parse_cdga_format(text):
+    """
+    Parse format with tournament name, date, day+course location, and status information.
+    Example:
+    CDGA Amateur Qualifying
+    May 20, 2025
+    TuesdayPalatine Hills Golf Course (Palatine, IL)
+    Details  Tee Times
+    Closed
+    """
+    lines = [line.strip() for line in text.split('\n') if line.strip()]
+    
+    tournaments = []
+    i = 0
+    
+    while i < len(lines):
+        # Skip if we don't have enough lines left for a complete entry
+        if i + 2 >= len(lines):
+            i += 1
+            continue
+        
+        # First line should be tournament name
+        tournament_name = lines[i]
+        i += 1
+        
+        # Second line should be date
+        date_line = lines[i]
+        
+        # Check if this is a date line
+        date_pattern = r'(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+\d{1,2}(?:,?\s+\d{4})?'
+        date_range_pattern = r'(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+\d{1,2}\s*-\s*\d{1,2},?\s+\d{4}'
+        multi_month_range_pattern = r'(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+\d{1,2}\s*-\s*(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s*\d{1,2},?\s+\d{4}'
+        simple_pattern = r'(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d{1,2}\s*-\s*\d{1,2},?\s+\d{4}'
+        
+        # Check various date formats
+        if (re.match(date_pattern, date_line) or 
+            re.match(date_range_pattern, date_line) or 
+            re.match(multi_month_range_pattern, date_line) or
+            re.match(simple_pattern, date_line)):
+            
+            # Process date line
+            if "-" in date_line:
+                # This is a date range
+                date_parts = date_line.split("-")
+                first_date = date_parts[0].strip()
+                
+                # Extract first date
+                date_value = ultra_simple_date_extractor(first_date, year)
+            else:
+                # Single date
+                date_value = ultra_simple_date_extractor(date_line, year)
+            
+            i += 1
+            
+            # Third line should be day+course+location
+            day_course_line = lines[i] if i < len(lines) else ""
+            i += 1
+            
+            # Extract day of week
+            day_match = re.match(r'(Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday)', day_course_line)
+            
+            if day_match:
+                # Remove day from the line
+                course_location = day_course_line[day_match.end():].strip()
+            else:
+                course_location = day_course_line
+            
+            # Look for course name and location in parentheses
+            location_match = re.search(r'(.*?)\s*\(([^,]+),\s*([A-Z]{2})\)', course_location)
+            
+            course_name = ""
+            city = ""
+            state = ""
+            
+            if location_match:
+                course_name = location_match.group(1).strip()
+                city = location_match.group(2).strip()
+                state = location_match.group(3).strip()
+            else:
+                # Try another format - sometimes the location doesn't have parentheses
+                # Look for a comma followed by a state code
+                state_match = re.search(r',\s*([A-Z]{2})(?:\s|$)', course_location)
+                
+                if state_match:
+                    state = state_match.group(1)
+                    # Try to extract city and course
+                    parts = course_location[:state_match.start()].split(',')
+                    if len(parts) >= 2:
+                        course_name = ','.join(parts[:-1]).strip()
+                        city = parts[-1].strip()
+                    else:
+                        course_name = parts[0].strip()
+                else:
+                    # No location info, just use the whole line as course name
+                    course_name = course_location
+            
+            # Skip lines like "Details", "Tee Times", etc.
+            while i < len(lines) and (lines[i].startswith("  Details") or 
+                                     lines[i].startswith("  Tee Times") or 
+                                     lines[i].startswith("  Confirmations")):
+                i += 1
+            
+            # Status info might be on next line
+            status = ""
+            if i < len(lines) and (lines[i] == "Closed" or 
+                                 lines[i] == "Wait List" or 
+                                 lines[i] == "Online Entry" or
+                                 lines[i] == "Entry Info" or
+                                 lines[i] == "Invitation Only" or
+                                 "Entry" in lines[i]):
+                status = lines[i]
+                i += 1
+            
+            # Create tournament entry
+            if date_value:
+                # Add course details if included on a separate line
+                if i < len(lines) and "Course" in lines[i]:
+                    course_name += " - " + lines[i]
+                    i += 1
+                
+                tournament = {
+                    'Date': date_value,
+                    'Name': tournament_name.strip(),
+                    'Course': course_name,
+                    'Category': "Men's",  # Default category
+                    'Gender': determine_gender(tournament_name),
+                    'City': city,
+                    'State': state if state else (default_state if default_state else ""),
+                    'Zip': None
+                }
+                
+                # Determine category based on tournament name
+                name_lower = tournament_name.lower()
+                if "amateur" in name_lower and "four-ball" not in name_lower and "senior" not in name_lower:
+                    tournament['Category'] = "Amateur"
+                elif "senior amateur" in name_lower:
+                    tournament['Category'] = "Seniors"
+                elif "mid-amateur" in name_lower:
+                    tournament['Category'] = "Mid-Amateur"
+                elif "four-ball" in name_lower:
+                    tournament['Category'] = "Four-Ball"
+                elif "women" in name_lower or "ladies" in name_lower:
+                    tournament['Category'] = "Women's"
+                elif "junior" in name_lower:
+                    tournament['Category'] = "Junior's"
+                
+                tournaments.append(tournament)
+        else:
+            # Not a date line, skip
+            i += 1
+    
+    # Convert to DataFrame
+    if tournaments:
+        st.write(f"Debug: Found {len(tournaments)} tournaments in CDGA format")
+        
+        tournaments_df = pd.DataFrame(tournaments)
+        
+        # Ensure all required columns exist
+        for col in REQUIRED_COLUMNS:
+            if col not in tournaments_df.columns:
+                tournaments_df[col] = None
+                
+        return tournaments_df
+    else:
+        # Return empty DataFrame with all required columns
+        return pd.DataFrame(columns=REQUIRED_COLUMNS)
+    
 def parse_events_with_sections_format(text):
     """
     Parse format with "Dates" and "Event Information" sections.
@@ -1215,6 +1382,23 @@ def detect_format(text):
     """Detect which format the text is in."""
     # Split the text into lines and check for patterns
     lines = [line.strip() for line in text.split('\n')]
+    
+    # Check for CDGA format with "Details", "Tee Times", "Closed", etc.
+    cdga_pattern_count = 0
+    qualifying_count = 0
+    details_count = 0
+    
+    for i in range(len(lines)):
+        if "Qualifying" in lines[i] or "Championship" in lines[i]:
+            qualifying_count += 1
+        if "  Details" in lines[i] or "  Tee Times" in lines[i]:
+            details_count += 1
+        if i > 0 and (lines[i] == "Closed" or lines[i] == "Wait List" or 
+                      lines[i] == "Online Entry" or lines[i] == "Entry Info"):
+            cdga_pattern_count += 1
+    
+    if (qualifying_count >= 3 and details_count >= 3) or cdga_pattern_count >= 3:
+        return "CDGA_FORMAT"
     
     # Check for events with sections format (Dates and Event Information)
     if len(lines) > 1 and lines[0] == "Dates" and lines[1] == "Event Information":
@@ -2113,7 +2297,9 @@ def parse_tournament_text(text):
     format_type = detect_format(text)
     st.write(f"Detected format: {format_type}")
     
-    if format_type == "EVENTS_WITH_SECTIONS_FORMAT":
+    if format_type == "CDGA_FORMAT":
+        return parse_cdga_format(text)
+    elif format_type == "EVENTS_WITH_SECTIONS_FORMAT":
         return parse_events_with_sections_format(text)
     elif format_type == "SIMPLE_DATE_CLUB_CITY_FORMAT":
         return parse_simple_date_club_city_format(text)
