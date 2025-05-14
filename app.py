@@ -1531,7 +1531,16 @@ def detect_format(text):
     # Split the text into lines and check for patterns
     lines = [line.strip() for line in text.split('\n')]
 
-     # Check for name-date-course format with dates in MM.DD format
+     # Check for course-first format (course, tournament, course again, city/state, date)
+    course_repeat_count = 0
+    for i in range(len(lines) - 2):
+        if lines[i] == lines[i+2]:  # Course name repeats
+            course_repeat_count += 1
+    
+    if course_repeat_count >= 3:
+        return "COURSE_FIRST_FORMAT"
+    
+    # Check for name-date-course format with dates in MM.DD format
     mm_dd_date_count = 0
     club_count = 0
     
@@ -1907,6 +1916,132 @@ def parse_custom_format(text):
     # Convert to DataFrame
     if tournaments:
         st.write(f"Debug: Found {len(tournaments)} tournaments in custom format")
+        
+        tournaments_df = pd.DataFrame(tournaments)
+        
+        # Ensure all required columns exist
+        for col in REQUIRED_COLUMNS:
+            if col not in tournaments_df.columns:
+                tournaments_df[col] = None
+                
+        return tournaments_df
+    else:
+        # Return empty DataFrame with all required columns
+        return pd.DataFrame(columns=REQUIRED_COLUMNS)
+    
+def parse_course_first_format(text):
+    """
+    Parse format with course name first, then tournament name, course name again, city/state, and date range.
+    Example:
+    Squire Creek Country Club
+    Women's Southern Amateur Championship
+    Squire Creek Country Club
+    Choudrant, LA
+    Jun 02, 2025 - Jun 05, 2025
+    """
+    lines = [line.strip() for line in text.split('\n') if line.strip()]
+    
+    tournaments = []
+    i = 0
+    
+    while i < len(lines):
+        # Need at least 5 lines for a complete entry
+        if i + 4 >= len(lines):
+            i += 1
+            continue
+        
+        # First line should be course name
+        course_name_first = lines[i]
+        i += 1
+        
+        # Second line should be tournament name
+        tournament_name = lines[i]
+        i += 1
+        
+        # Third line should be course name again
+        course_name_second = lines[i]
+        i += 1
+        
+        # Fourth line should be city, state
+        location_line = lines[i]
+        i += 1
+        
+        # Fifth line should be date range
+        date_line = ""
+        if i < len(lines):
+            date_line = lines[i]
+            i += 1
+        
+        # Parse location for city and state
+        location_match = re.search(r'(.*?),\s+([A-Z]{2})$', location_line)
+        city = ""
+        state = ""
+        
+        if location_match:
+            city = location_match.group(1).strip()
+            state = location_match.group(2).strip()
+        else:
+            # No clear pattern, try to extract state code
+            state_match = re.search(r'\b([A-Z]{2})\b', location_line)
+            if state_match:
+                state = state_match.group(1)
+                # Try to extract city
+                city_parts = location_line.split(state)
+                if city_parts and city_parts[0]:
+                    city = city_parts[0].rstrip(', ').strip()
+            else:
+                # Use entire line as city and default state
+                city = location_line
+                state = default_state if default_state else ""
+        
+        # Process date range
+        if "-" in date_line:
+            first_date = date_line.split("-")[0].strip()
+        else:
+            first_date = date_line
+        
+        # Get formatted date
+        date_value = ultra_simple_date_extractor(first_date, year)
+        
+        if date_value:
+            # Use second course name as it's more likely to be accurate
+            final_course_name = course_name_second if course_name_second else course_name_first
+            
+            # Create tournament entry
+            tournament = {
+                'Date': date_value,
+                'Name': tournament_name.strip(),
+                'Course': final_course_name.strip(),
+                'Category': "Men's",  # Default category
+                'Gender': determine_gender(tournament_name),
+                'City': city,
+                'State': state,
+                'Zip': None
+            }
+            
+            # Determine category based on tournament name
+            name_lower = tournament_name.lower()
+            if "amateur" in name_lower and "mid-amateur" not in name_lower and "junior" not in name_lower:
+                tournament['Category'] = "Amateur"
+            elif "mid-amateur" in name_lower:
+                tournament['Category'] = "Mid-Amateur"
+            elif "senior" in name_lower:
+                tournament['Category'] = "Seniors"
+            elif "women" in name_lower or "ladies" in name_lower or "girls" in name_lower:
+                tournament['Category'] = "Women's"
+            elif "junior" in name_lower and "girls" not in name_lower:
+                tournament['Category'] = "Junior's"
+            elif "girls junior" in name_lower:
+                tournament['Category'] = "Junior's"
+                tournament['Gender'] = "Women's"
+            elif "four-ball" in name_lower:
+                tournament['Category'] = "Four-Ball"
+            
+            tournaments.append(tournament)
+    
+    # Convert to DataFrame
+    if tournaments:
+        st.write(f"Debug: Found {len(tournaments)} tournaments in course-first format")
         
         tournaments_df = pd.DataFrame(tournaments)
         
@@ -2459,7 +2594,9 @@ def parse_tournament_text(text):
     format_type = detect_format(text)
     st.write(f"Detected format: {format_type}")
     
-    if format_type == "NAME_DATE_COURSE_FORMAT":
+    if format_type == "COURSE_FIRST_FORMAT":
+        return parse_course_first_format(text)
+    elif format_type == "NAME_DATE_COURSE_FORMAT":
         return parse_name_date_course_format(text)
     elif format_type == "CDGA_FORMAT":
         return parse_cdga_format(text)
