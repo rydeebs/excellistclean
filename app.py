@@ -1069,6 +1069,154 @@ def parse_simple_date_club_city_format(text):
         empty_df = pd.DataFrame(columns=REQUIRED_COLUMNS)
         return empty_df
     
+def parse_name_date_course_format(text):
+    """
+    Parse format with tournament name, date in MM.DD format, and course with city.
+    Example:
+    Spring Triple Threat
+    04.16
+    Sycamore Ridge Golf Club, Spring Hill
+    """
+    lines = [line.strip() for line in text.split('\n') if line.strip()]
+    
+    tournaments = []
+    i = 0
+    
+    while i < len(lines):
+        # Need at least 3 lines for a complete entry (name, date, course+city)
+        if i + 2 >= len(lines):
+            i += 1
+            continue
+            
+        # First line should be tournament name
+        tournament_name = lines[i]
+        i += 1
+        
+        # Second line should be date in MM.DD format or MM.DD / MM.DD for multiple days
+        date_line = lines[i]
+        
+        # Check if this is a date line in MM.DD format
+        date_pattern = r'^\d{2}\.\d{2}$'
+        date_range_pattern = r'^\d{2}\.\d{2}\s*/\s*\d{2}\.\d{2}$'
+        
+        date_match = re.match(date_pattern, date_line) or re.match(date_range_pattern, date_line)
+        
+        if date_match:
+            # Process date - convert from MM.DD format to proper date
+            if "/" in date_line:
+                # This is a date range (e.g., 06.16 / 06.17)
+                first_date = date_line.split("/")[0].strip()
+                month = first_date.split(".")[0]
+                day = first_date.split(".")[1]
+            else:
+                # Single date (e.g., 04.16)
+                month = date_line.split(".")[0]
+                day = date_line.split(".")[1]
+            
+            # Convert month and day to integers to remove leading zeros
+            try:
+                month_int = int(month)
+                day_int = int(day)
+                
+                # Map month number to month name
+                month_names = ["January", "February", "March", "April", "May", "June", 
+                              "July", "August", "September", "October", "November", "December"]
+                month_name = month_names[month_int - 1]  # -1 because list is 0-indexed
+                
+                # Construct date string in a format that ultra_simple_date_extractor can handle
+                formatted_date = f"{month_name} {day_int}, {year}"
+                date_value = ultra_simple_date_extractor(formatted_date, year)
+            except (ValueError, IndexError):
+                # If month/day conversion fails, try as-is
+                date_value = None
+            
+            i += 1
+            
+            # Third line should be course + city
+            course_city_line = lines[i] if i < len(lines) else ""
+            i += 1
+            
+            # Extract course and city/state
+            if "," in course_city_line:
+                parts = course_city_line.split(",", 1)
+                course_name = parts[0].strip()
+                
+                # Check if we have city and state
+                location_parts = parts[1].strip().split(",")
+                if len(location_parts) > 1:
+                    city = location_parts[0].strip()
+                    state = location_parts[1].strip()
+                    # Check if state is a 2-letter code
+                    if len(state) > 2:
+                        # If not, it might be part of the city
+                        city = parts[1].strip()
+                        state = default_state if default_state else ""
+                else:
+                    # Only city, no state
+                    city = parts[1].strip()
+                    
+                    # Check if the "city" contains state code
+                    state_match = re.search(r'([A-Z]{2})$', city)
+                    if state_match:
+                        # Extract state code at the end
+                        state = state_match.group(1)
+                        city = city[:-len(state)].strip()
+                    else:
+                        # Use default state
+                        state = default_state if default_state else ""
+            else:
+                # No comma separator, use whole line as course name
+                course_name = course_city_line
+                city = ""
+                state = default_state if default_state else ""
+            
+            if date_value:
+                # Create tournament entry
+                tournament = {
+                    'Date': date_value,
+                    'Name': tournament_name.strip(),
+                    'Course': course_name,
+                    'Category': "Women's",  # Default to Women's based on the example
+                    'Gender': "Women's",    # Default to Women's based on the example
+                    'City': city,
+                    'State': state,
+                    'Zip': None
+                }
+                
+                # Determine category based on tournament name
+                name_lower = tournament_name.lower()
+                if "amateur" in name_lower and "mid-amateur" not in name_lower and "senior" not in name_lower:
+                    tournament['Category'] = "Amateur"
+                elif "senior" in name_lower:
+                    tournament['Category'] = "Seniors"
+                elif "mid-amateur" in name_lower:
+                    tournament['Category'] = "Mid-Amateur"
+                elif "women" in name_lower or "ladies" in name_lower:
+                    tournament['Category'] = "Women's"
+                elif "junior" in name_lower or "girls" in name_lower:
+                    tournament['Category'] = "Junior's"
+                
+                tournaments.append(tournament)
+        else:
+            # Not a date line, skip to next line
+            i += 1
+    
+    # Convert to DataFrame
+    if tournaments:
+        st.write(f"Debug: Found {len(tournaments)} tournaments in name-date-course format")
+        
+        tournaments_df = pd.DataFrame(tournaments)
+        
+        # Ensure all required columns exist
+        for col in REQUIRED_COLUMNS:
+            if col not in tournaments_df.columns:
+                tournaments_df[col] = None
+                
+        return tournaments_df
+    else:
+        # Return empty DataFrame with all required columns
+        return pd.DataFrame(columns=REQUIRED_COLUMNS)
+    
 def parse_cdga_format(text):
     """
     Parse format with tournament name, date, day+course location, and status information.
@@ -1382,6 +1530,20 @@ def detect_format(text):
     """Detect which format the text is in."""
     # Split the text into lines and check for patterns
     lines = [line.strip() for line in text.split('\n')]
+
+     # Check for name-date-course format with dates in MM.DD format
+    mm_dd_date_count = 0
+    club_count = 0
+    
+    for i in range(len(lines)):
+        if re.match(r'^\d{2}\.\d{2}$', lines[i]) or re.match(r'^\d{2}\.\d{2}\s*/\s*\d{2}\.\d{2}$', lines[i]):
+            mm_dd_date_count += 1
+        if i > 0 and i + 1 < len(lines) and (
+            "Club" in lines[i] or "Course" in lines[i] or "Golf" in lines[i]) and "," in lines[i]:
+            club_count += 1
+    
+    if mm_dd_date_count >= 3 and club_count >= 3:
+        return "NAME_DATE_COURSE_FORMAT"
     
     # Check for CDGA format with "Details", "Tee Times", "Closed", etc.
     cdga_pattern_count = 0
@@ -2297,7 +2459,9 @@ def parse_tournament_text(text):
     format_type = detect_format(text)
     st.write(f"Detected format: {format_type}")
     
-    if format_type == "CDGA_FORMAT":
+    if format_type == "NAME_DATE_COURSE_FORMAT":
+        return parse_name_date_course_format(text)
+    elif format_type == "CDGA_FORMAT":
         return parse_cdga_format(text)
     elif format_type == "EVENTS_WITH_SECTIONS_FORMAT":
         return parse_events_with_sections_format(text)
