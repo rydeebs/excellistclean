@@ -3867,44 +3867,127 @@ def ensure_column_order(df):
     # Return the properly ordered DataFrame
     return df[ordered_columns]
 
-# Final solution process button that uses direct manual parsing
-if st.button("Process Tournament Data"):
+def direct_course_repeat_parser(text, year="2025", default_state=""):
+    """
+    DIRECT parser for course-repeating format that correctly extracts tournament names from line 2.
+    Pattern:
+    Line 1: Course name
+    Line 2: Tournament name 
+    Line 3: Course name (repeated)
+    Line 4: City, State
+    Line 5: Date range
+    """
+    # Split text into lines and remove empty lines
+    lines = [line.strip() for line in text.split('\n') if line.strip()]
+    
+    # Debug output
+    st.write("### Examining input format")
+    for i in range(min(9, len(lines))):
+        st.write(f"Line {i+1}: {lines[i]}")
+    
+    # Create result container
+    tournaments = []
+    
+    # Process lines in groups of 5
+    i = 0
+    while i < len(lines):
+        # Check if we have enough lines for a complete entry
+        if i + 4 < len(lines):
+            # Extract the 5 lines in this group
+            course_name_1 = lines[i]
+            tournament_name = lines[i+1]
+            course_name_2 = lines[i+2]
+            location = lines[i+3]
+            date_line = lines[i+4]
+            
+            # Check if this matches our pattern (course names match)
+            if course_name_1 == course_name_2:
+                st.write(f"Found course-repeating pattern at line {i+1}")
+                
+                # Parse location (City, State)
+                location_match = re.search(r'(.*?),\s+([A-Z]{2})', location)
+                city = ""
+                state = ""
+                if location_match:
+                    city = location_match.group(1).strip()
+                    state = location_match.group(2).strip()
+                else:
+                    # If no match, use whole string as city and default state
+                    city = location
+                    state = default_state if default_state else ""
+                
+                # Parse date (extract first date from range)
+                date_value = None
+                if "-" in date_line:
+                    first_date = date_line.split("-")[0].strip()
+                    date_value = ultra_simple_date_extractor(first_date, year)
+                else:
+                    date_value = ultra_simple_date_extractor(date_line, year)
+                
+                if date_value:
+                    # Create tournament entry
+                    tournament = {
+                        'Date': date_value,
+                        'Name': tournament_name.strip(),  # Name from line 2
+                        'Course': course_name_1.strip(),  # Course from line 1
+                        'Category': "Men's",  # Default category
+                        'Gender': determine_gender(tournament_name),
+                        'City': city,
+                        'State': state,
+                        'Zip': None
+                    }
+                    
+                    # Override category based on tournament name
+                    name_lower = tournament_name.lower()
+                    if "amateur" in name_lower:
+                        tournament['Category'] = "Amateur"
+                    elif "senior" in name_lower:
+                        tournament['Category'] = "Seniors"
+                    elif "women" in name_lower or "ladies" in name_lower:
+                        tournament['Category'] = "Women's"
+                        tournament['Gender'] = "Women's"
+                    elif "junior" in name_lower or "boys" in name_lower or "girls" in name_lower:
+                        tournament['Category'] = "Junior's"
+                    
+                    tournaments.append(tournament)
+                
+                # Move to next group of 5 lines
+                i += 5
+            else:
+                # Not matching pattern, move to next line
+                i += 1
+        else:
+            # Not enough lines left for complete entry
+            break
+    
+    # Create DataFrame from results
+    if tournaments:
+        st.write(f"Successfully parsed {len(tournaments)} tournaments")
+        
+        # Create DataFrame with specific columns
+        columns = ['Date', 'Name', 'Course', 'Category', 'Gender', 'City', 'State', 'Zip']
+        tournaments_df = pd.DataFrame(tournaments, columns=columns)
+        
+        # Debug output
+        st.write("### Name Column Values (Debug)")
+        for i, name in enumerate(tournaments_df['Name'].tolist()[:5]):
+            st.write(f"Row {i+1}: '{name}' (Type: {type(name).__name__})")
+        
+        return tournaments_df
+    else:
+        st.write("No tournaments found with course-repeating format")
+        return pd.DataFrame(columns=REQUIRED_COLUMNS)
+
+# Process Tournament Data button handler replacement
+def process_tournament_data_fixed():
     if tournament_text:
         try:
             # Add a separator for clarity
             st.markdown("---")
             st.markdown("## Processing Tournament Data")
             
-            # Split the text into lines for analysis
-            lines = [line.strip() for line in tournament_text.split('\n') if line.strip()]
-            
-            # Show first few lines for debugging
-            st.write("### Examining input format")
-            for i in range(min(9, len(lines))):
-                st.write(f"Line {i+1}: {lines[i]}")
-            
-            # Use the force_format_parser instead of parse_tournament_text
-            df = force_format_parser(tournament_text, year, default_state)
-            
-            # Is this Montana format?
-            montana_format = False
-            for i in range(len(lines) - 2):
-                # Look for date-course line with dash pattern
-                if i+1 < len(lines) and " - " in lines[i+1] and re.search(r'(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d{1,2},\s+\d{4}\s+-', lines[i+1]):
-                    montana_format = True
-                    break
-            
-            # Use appropriate parser based on the format
-            if montana_format:
-                st.write("### Montana format detected - using direct manual parser")
-                df = parse_montana_format_direct(tournament_text)
-            elif "View" in tournament_text and re.search(r'(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun),\s+', tournament_text):
-                st.write("### USGA View format detected")
-                df = parse_usga_view_format(tournament_text)
-            else:
-                # Fall back to general format detection
-                st.write("### Using general format detection")
-                df = parse_tournament_text(tournament_text)
+            # Use the direct parser - completely bypass format detection
+            df = direct_course_repeat_parser(tournament_text, year, default_state)
             
             # Check if DataFrame is empty
             if df.empty:
@@ -3916,12 +3999,6 @@ if st.button("Process Tournament Data"):
                 st.write("### DataFrame Details")
                 st.write(f"DataFrame shape: {df.shape}")
                 st.write(f"DataFrame columns: {df.columns.tolist()}")
-                
-                # Ensure all required columns exist
-                for col in REQUIRED_COLUMNS:
-                    if col not in df.columns:
-                        st.warning(f"Adding missing column: {col}")
-                        df[col] = None
                 
                 # Ensure Name column has values
                 if 'Name' in df.columns:
@@ -3957,10 +4034,6 @@ if st.button("Process Tournament Data"):
             # Display the full DataFrame without pagination (show all rows)
             st.write("### Extracted Tournament Data")
             st.write(df)
-            
-            # Also show the raw data in table format to ensure all rows are visible
-            st.write("### Tournament Table (All Rows)")
-            st.table(df.head(100))  # Show up to 100 rows in table format
             
             # Create download buttons for the data
             csv = df.to_csv(index=False)
