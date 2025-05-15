@@ -711,6 +711,97 @@ def parse_usga_qualifier_expanded_format(text):
     else:
         # Return empty DataFrame with all required columns
         return pd.DataFrame(columns=REQUIRED_COLUMNS)
+    
+def parse_usga_view_format(text):
+    """
+    Special parser for USGA format with tournament, View, date, course pattern.
+    Handles formats like:
+    
+    2025 US Girls' Junior Amateur Qualifying
+    View
+    Thu, Jun 12, 2025
+    Oak Glen Golf Course
+    """
+    lines = [line.strip() for line in text.split('\n') if line.strip()]
+    
+    tournaments = []
+    i = 0
+    
+    # Month dictionary for date conversion
+    month_dict = {
+        'Jan': '01', 'Feb': '02', 'Mar': '03', 'Apr': '04', 'May': '05', 'Jun': '06',
+        'Jul': '07', 'Aug': '08', 'Sep': '09', 'Oct': '10', 'Nov': '11', 'Dec': '12'
+    }
+    
+    # Process lines in groups of 4
+    while i <= len(lines) - 4:  # Need at least 4 lines
+        tournament_name = lines[i]
+        view_line = lines[i + 1]
+        date_line = lines[i + 2]
+        course_name = lines[i + 3]
+        
+        # Check if this is a USGA tournament entry (second line is "View")
+        if view_line == "View":
+            # Extract date components from date line
+            date_match = re.search(r'^(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun),\s+(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+(\d{1,2}),\s+(\d{4})$', date_line)
+            
+            if date_match:
+                month, day, yr = date_match.groups()
+                date_value = f"{yr}-{month_dict[month]}-{day.zfill(2)}"
+                
+                # Determine category based on tournament name
+                category = "Amateur"
+                if "Senior" in tournament_name and "Women's" not in tournament_name:
+                    category = "Seniors"
+                elif "Junior" in tournament_name or "Girls'" in tournament_name:
+                    category = "Junior's" 
+                elif "Mid-Amateur" in tournament_name:
+                    category = "Mid-Amateur"
+                elif "Four-Ball" in tournament_name:
+                    category = "Four-Ball"
+                elif "Women's" in tournament_name:
+                    category = "Women's"
+                
+                # Determine gender based on tournament name
+                gender = "Men's"
+                if "Women's" in tournament_name or "Girls'" in tournament_name:
+                    gender = "Women's"
+                
+                # Create tournament entry
+                tournament = {
+                    'Date': date_value,
+                    'Name': tournament_name,
+                    'Course': course_name,
+                    'Category': category,
+                    'Gender': gender,
+                    'City': None,
+                    'State': default_state if default_state else None,
+                    'Zip': None
+                }
+                
+                tournaments.append(tournament)
+            
+            # Always move to next group of 4 lines if the pattern matched
+            i += 4
+        else:
+            # Try next line if pattern doesn't match
+            i += 1
+    
+    # Convert to DataFrame
+    if tournaments:
+        st.write(f"Found {len(tournaments)} tournaments in USGA view format")
+        
+        tournaments_df = pd.DataFrame(tournaments)
+        
+        # Ensure all required columns exist
+        for col in REQUIRED_COLUMNS:
+            if col not in tournaments_df.columns:
+                tournaments_df[col] = None
+        
+        return tournaments_df
+    else:
+        # Return empty DataFrame with all required columns
+        return pd.DataFrame(columns=REQUIRED_COLUMNS)
 
 def parse_four_line_format(text):
     """
@@ -2998,19 +3089,12 @@ def ensure_column_order(df):
 if st.button("Process Tournament Data"):
     if tournament_text:
         try:
-            # Parse the text
-            df = parse_tournament_text(tournament_text)
-            
-            # Check if DataFrame is empty
-            if df.empty:
-                st.error("No tournaments could be extracted from the text. Please check the format.")
-                # Create an empty DataFrame with all required columns
-                df = pd.DataFrame(columns=REQUIRED_COLUMNS)
+            # Special case for USGA format with "View" pattern
+            if "View" in tournament_text and "US " in tournament_text and re.search(r'(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun),\s+', tournament_text):
+                df = parse_usga_view_format(tournament_text)
             else:
-                # Ensure all required columns exist
-                for col in REQUIRED_COLUMNS:
-                    if col not in df.columns:
-                        df[col] = None
+                # Parse using regular format detection
+                df = parse_tournament_text(tournament_text)
                 
                 # Ensure Gender is set for all rows
                 df['Gender'] = df['Name'].apply(determine_gender)
