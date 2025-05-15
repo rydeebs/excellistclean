@@ -1351,6 +1351,170 @@ def parse_simple_date_club_city_format(text):
         empty_df = pd.DataFrame(columns=REQUIRED_COLUMNS)
         return empty_df
     
+def parse_missouri_tournament_format(text):
+    """
+    Parse Missouri golf tournament format with day/month on separate lines.
+    Example:
+    19
+    May
+    Senior Four Ball Championship
+    May 19, 2025 - May 20, 2025
+    Oakwood Country Club, Kansas City, Missouri
+    Men's Tournament
+    """
+    lines = [line.strip() for line in text.split('\n') if line.strip()]
+    
+    tournaments = []
+    i = 0
+    
+    # Process in groups of 6 lines
+    while i + 5 < len(lines):
+        try:
+            # Check if this is the expected pattern
+            day = lines[i]
+            month = lines[i+1]
+            tournament_name = lines[i+2]
+            date_range = lines[i+3]
+            course_location = lines[i+4]
+            tournament_type = lines[i+5]
+            
+            # Basic validation - check if first line is a number (day) and second is a month
+            month_names = ["January", "February", "March", "April", "May", "June", "July", "August", 
+                           "September", "October", "November", "December", "Jan", "Feb", "Mar", 
+                           "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+            
+            is_day_number = day.isdigit() and 1 <= int(day) <= 31
+            is_month_name = any(m == month for m in month_names)
+            
+            if is_day_number and is_month_name:
+                # This pattern matches, extract tournament data
+                
+                # Parse the date range
+                if "-" in date_range:
+                    first_date = date_range.split("-")[0].strip()
+                else:
+                    first_date = date_range.strip()
+                
+                date_value = ultra_simple_date_extractor(first_date, year)
+                
+                # Parse course and location
+                course = ""
+                city = ""
+                state = ""
+                
+                if "," in course_location:
+                    parts = course_location.split(",")
+                    course = parts[0].strip()
+                    
+                    if len(parts) >= 3:
+                        city = parts[1].strip()
+                        state = parts[2].strip()
+                    elif len(parts) == 2:
+                        # The last part might have both city and state
+                        location_part = parts[1].strip()
+                        
+                        # Try to extract state
+                        state_match = re.search(r'\b(Missouri|MO|Iowa|IL|Illinois|Kansas|KS|Arkansas|AR|Oklahoma|OK|Tennessee|TN|Kentucky|KY|Nebraska|NE)\b', location_part)
+                        if state_match:
+                            state = state_match.group(0)
+                            # Convert full state names to abbreviations
+                            if state == "Missouri":
+                                state = "MO"
+                            elif state == "Illinois":
+                                state = "IL"
+                            elif state == "Kansas":
+                                state = "KS"
+                            elif state == "Arkansas":
+                                state = "AR"
+                            elif state == "Oklahoma":
+                                state = "OK"
+                            elif state == "Tennessee":
+                                state = "TN"
+                            elif state == "Kentucky":
+                                state = "KY"
+                            elif state == "Nebraska":
+                                state = "NE"
+                            
+                            # City is what's left after removing the state
+                            city = location_part.replace(state_match.group(0), "").strip()
+                            if city.endswith(","):
+                                city = city[:-1]
+                        else:
+                            city = location_part
+                else:
+                    course = course_location
+                
+                # Determine gender from tournament type
+                gender = "Men's"
+                if "Women's" in tournament_type:
+                    if "Men's" in tournament_type:
+                        gender = "Mixed"
+                    else:
+                        gender = "Women's"
+                
+                # Determine category based on tournament name
+                name_lower = tournament_name.lower()
+                category = "Men's"  # Default
+                
+                if "senior" in name_lower:
+                    category = "Seniors"
+                elif "amateur" in name_lower and "qualifier" not in name_lower:
+                    category = "Amateur"
+                elif "four ball" in name_lower:
+                    category = "Four-Ball"
+                elif "mid-amateur" in name_lower:
+                    category = "Mid-Amateur"
+                elif "parent child" in name_lower:
+                    category = "Mixed/Couples"
+                elif "adaptive" in name_lower:
+                    category = "Adaptive"
+                elif "qualifier" in name_lower:
+                    category = "Qualifier"
+                elif "match play" in name_lower:
+                    category = "Match Play"
+                elif "stroke play" in name_lower:
+                    category = "Stroke Play"
+                
+                # Create tournament entry
+                if date_value:
+                    tournament = {
+                        'Date': date_value,
+                        'Name': tournament_name,
+                        'Course': course,
+                        'Category': category,
+                        'Gender': gender,
+                        'City': city,
+                        'State': state if state else (default_state if default_state else None),
+                        'Zip': None
+                    }
+                    tournaments.append(tournament)
+                
+                # Move to next group of 6 lines
+                i += 6
+            else:
+                # Not a match for our pattern, skip to next line
+                i += 1
+        except Exception as e:
+            # Error processing this group, skip to next line
+            st.write(f"Error processing group at index {i}: {str(e)}")
+            i += 1
+    
+    # Convert to DataFrame
+    if tournaments:
+        st.write(f"Debug: Found {len(tournaments)} tournaments in Missouri format")
+        
+        tournaments_df = pd.DataFrame(tournaments)
+        
+        # Ensure all required columns exist
+        for col in REQUIRED_COLUMNS:
+            if col not in tournaments_df.columns:
+                tournaments_df[col] = None
+                
+        return tournaments_df
+    else:
+        # Return empty DataFrame with all required columns
+        return pd.DataFrame(columns=REQUIRED_COLUMNS)
+    
 def parse_name_date_course_format(text):
     """
     Parse format with tournament name, date in MM.DD format, and course with city.
@@ -1810,8 +1974,26 @@ def parse_events_with_sections_format(text):
 
 def detect_format(text):
     """Detect which format the text is in."""
-    # Split the text into lines and check for patterns
+     # Split the text into lines and check for patterns
     lines = [line.strip() for line in text.split('\n')]
+
+    # Check for Missouri format with day/month on separate lines followed by tournament name
+    missouri_pattern_count = 0
+    month_names = ["January", "February", "March", "April", "May", "June", "July", "August", 
+                 "September", "October", "November", "December", "Jan", "Feb", "Mar", 
+                 "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+    
+    for i in range(len(lines) - 5):
+        if (lines[i].isdigit() and 1 <= int(lines[i]) <= 31 and
+            lines[i+1] in month_names and
+            len(lines[i+2]) > 5 and  # Tournament name
+            any(month in lines[i+3] for month in month_names) and  # Date with month
+            "," in lines[i+4] and  # Course, City, State
+            "Tournament" in lines[i+5]):  # Tournament type
+            missouri_pattern_count += 1
+    
+    if missouri_pattern_count >= 1:
+        return "MISSOURI_FORMAT"
 
     # Check for GAM championship format with Type, Format, Age Group, Gender on separate lines
     type_format_count = 0
@@ -2881,7 +3063,9 @@ def parse_tournament_text(text):
     format_type = detect_format(text)
     st.write(f"Detected format: {format_type}")
     
-    if format_type == "GAM_CHAMPIONSHIP_FORMAT":
+    if format_type == "MISSOURI_FORMAT":
+        return parse_missouri_tournament_format(text)
+    elif format_type == "GAM_CHAMPIONSHIP_FORMAT":
         return parse_gam_championship_format(text)
     elif format_type == "COURSE_FIRST_FORMAT":
         return parse_course_first_format(text)
