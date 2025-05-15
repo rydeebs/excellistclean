@@ -327,12 +327,15 @@ def parse_status_based_format(text):
     
 def parse_gam_championship_format(text):
     """
-    Parse format with tournament details in a structured format including headers, dates, course, and metadata.
+    Parse format with tournament details in a structured format, 
+    with tournament name and date on same line.
     Example:
-    **2nd GAM Girls' Championship**
-    **Apr 26, 2025 - Apr 27, 2025**
+    2nd GAM Girls' ChampionshipApr 26, 2025 - Apr 27, 2025
     WASHTENAW GOLF CLUB - Ypsilanti
-    Type: **Junior Championships** Format: **Tournament** Age Group: **Junior** Gender: **Female**
+    Type: Junior Championships
+    Format: Tournament
+    Age Group: Junior
+    Gender: Female
     """
     lines = [line.strip() for line in text.split('\n') if line.strip()]
     
@@ -340,37 +343,36 @@ def parse_gam_championship_format(text):
     i = 0
     
     while i < len(lines):
-        # Look for tournament name (bold text)
-        name_match = re.search(r'\*\*(.*?)\*\*', lines[i])
+        # Look for line with tournament name and date together
+        # Pattern: Name followed by month abbreviation and day
+        month_names = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", 
+                       "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
         
-        if name_match:
-            tournament_name = name_match.group(1).strip()
+        date_pattern = '|'.join(month_names)
+        name_date_pattern = f'(.*?)({date_pattern}\\s+\\d{{1,2}},?\\s+\\d{{4}}.*)'
+        
+        name_date_match = re.search(name_date_pattern, lines[i])
+        
+        if name_date_match:
+            # Extract tournament name and date from combined line
+            tournament_name = name_date_match.group(1).strip()
+            date_text = name_date_match.group(2).strip()
+            
+            # Extract first date from date range
+            if "-" in date_text:
+                first_date = date_text.split("-")[0].strip()
+            else:
+                first_date = date_text
+            
+            # Get formatted date
+            date_value = ultra_simple_date_extractor(first_date, year)
+            
             i += 1
             
-            # Next line might be date (also in bold text)
-            date_line = ""
-            date_value = None
-            
-            if i < len(lines):
-                date_match = re.search(r'\*\*(.*?)\*\*', lines[i])
-                if date_match and any(month in date_match.group(1) for month in 
-                                     ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]):
-                    date_line = date_match.group(1).strip()
-                    
-                    # Extract first date from date range
-                    if "-" in date_line:
-                        first_date = date_line.split("-")[0].strip()
-                    else:
-                        first_date = date_line
-                    
-                    # Get formatted date
-                    date_value = ultra_simple_date_extractor(first_date, year)
-                    i += 1
-            
-            # Skip any note lines with asterisks/italics (e.g., *SOLD OUT*)
-            while i < len(lines) and lines[i].startswith('*') and not lines[i].startswith('**'):
+            # Skip any note lines about sold out or waitlist
+            if i < len(lines) and ("SOLD OUT" in lines[i] or "WAITLIST" in lines[i]):
                 i += 1
-                
+            
             # Next line should be course and location
             course_location = ""
             course_name = ""
@@ -380,8 +382,8 @@ def parse_gam_championship_format(text):
                 course_location = lines[i]
                 
                 # Extract course name and city
-                if "-" in course_location:
-                    parts = course_location.split("-", 1)
+                if " - " in course_location:
+                    parts = course_location.split(" - ", 1)
                     course_name = parts[0].strip()
                     city = parts[1].strip() if len(parts) > 1 else ""
                 else:
@@ -389,51 +391,66 @@ def parse_gam_championship_format(text):
                 
                 i += 1
             
-            # Next line might have type, format, age group, gender
+            # Initialize category and gender with defaults
             category = "Men's"  # Default category
             gender = "Men's"    # Default gender
             
-            if i < len(lines) and "Type:" in lines[i]:
-                metadata_line = lines[i]
-                
-                # Extract gender if specified
-                gender_match = re.search(r'Gender:\s+\*\*(.*?)\*\*', metadata_line)
-                if gender_match:
-                    gender_text = gender_match.group(1).lower()
-                    if "female" in gender_text or "women" in gender_text:
-                        gender = "Women's"
-                    elif "male" in gender_text or "men" in gender_text:
-                        gender = "Men's"
-                
-                # Extract age group/category if specified
-                age_match = re.search(r'Age Group:\s+\*\*(.*?)\*\*', metadata_line)
-                if age_match:
-                    age_text = age_match.group(1).lower()
-                    if "junior" in age_text:
+            # Look for Type, Format, Age Group, Gender lines
+            while i < len(lines) and i < i + 4:  # Check next 4 lines at most
+                if "Type:" in lines[i]:
+                    type_line = lines[i].replace("Type:", "").strip()
+                    if "Junior" in type_line:
                         category = "Junior's"
-                    elif "senior" in age_text:
-                        category = "Seniors"
-                    elif "mid" in age_text:
-                        category = "Mid-Amateur"
-                    elif "open" in age_text:
-                        category = "Open"
-                    elif "mixed" in age_text:
-                        category = "Mixed/Couples"
+                    elif "Qualifier" in type_line:
+                        category = "Qualifier"
+                    elif "Team" in type_line:
+                        category = "Team"
+                    i += 1
+                    continue
                 
-                i += 1
-            
-            # Skip registration lines and other details
-            while i < len(lines) and ("Registration" in lines[i] or 
-                                    lines[i].startswith("Event Details") or 
-                                    "Deadline" in lines[i]):
-                i += 1
+                if "Age Group:" in lines[i]:
+                    age_line = lines[i].replace("Age Group:", "").strip()
+                    if "Junior" in age_line:
+                        category = "Junior's"
+                    elif "Senior" in age_line:
+                        category = "Seniors"
+                    elif "Mid" in age_line:
+                        category = "Mid-Amateur"
+                    elif "Open" in age_line:
+                        category = "Open"
+                    elif "Mixed" in age_line:
+                        category = "Mixed/Couples"
+                    i += 1
+                    continue
+                
+                if "Gender:" in lines[i]:
+                    gender_line = lines[i].replace("Gender:", "").strip()
+                    if "Female" in gender_line or "Women" in gender_line:
+                        gender = "Women's"
+                    elif "Male" in gender_line or "Men" in gender_line:
+                        gender = "Men's"
+                    i += 1
+                    continue
+                
+                if "Format:" in lines[i]:
+                    i += 1
+                    continue
+                
+                if "Registration" in lines[i]:
+                    i += 1
+                    continue
+                
+                # Not a metadata line, break out of this loop
+                break
             
             # If we didn't find a gender from metadata, try to determine from tournament name
-            if not gender or gender == "Men's":
-                gender = determine_gender(tournament_name)
+            if gender == "Men's":
+                name_gender = determine_gender(tournament_name)
+                if name_gender != "Men's":  # Only override if not default
+                    gender = name_gender
             
             # If we didn't find a category from metadata, try to determine from tournament name
-            if not category or category == "Men's":
+            if category == "Men's":
                 name_lower = tournament_name.lower()
                 if "amateur" in name_lower and "mid-amateur" not in name_lower:
                     category = "Amateur"
@@ -475,8 +492,12 @@ def parse_gam_championship_format(text):
                 }
                 
                 tournaments.append(tournament)
+                
+                # Skip remaining registration and event details lines
+                while i < len(lines) and ("Registration" in lines[i] or "Deadline" in lines[i]):
+                    i += 1
         else:
-            # No tournament name found, move to next line
+            # Not a tournament name/date line, move to next line
             i += 1
     
     # Convert to DataFrame
@@ -1701,17 +1722,17 @@ def detect_format(text):
     # Split the text into lines and check for patterns
     lines = [line.strip() for line in text.split('\n')]
 
-    # Check for GAM championship format with bold headers and metadata
-    gam_format_indicators = 0
-    for line in lines:
-        if "Type:" in line and "Format:" in line and "Gender:" in line:
-            gam_format_indicators += 1
-        if "Registration Opens:" in line or "Registration Deadline:" in line:
-            gam_format_indicators += 1
-        if "Event Details" in line and "Registration" in line and "Results" in line:
-            gam_format_indicators += 1
+    # Check for GAM championship format with Type, Format, Age Group, Gender on separate lines
+    type_format_count = 0
+    registration_count = 0
     
-    if gam_format_indicators >= 3:
+    for line in lines:
+        if line.startswith("Type:") or line.startswith("Format:") or line.startswith("Age Group:") or line.startswith("Gender:"):
+            type_format_count += 1
+        if line.startswith("Registration Opens:") or line.startswith("Registration Deadline:"):
+            registration_count += 1
+    
+    if type_format_count >= 3 and registration_count >= 2:
         return "GAM_CHAMPIONSHIP_FORMAT"
     
     # Check for course-first format (course, tournament, course again, city/state, date)
