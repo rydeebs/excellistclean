@@ -2135,113 +2135,110 @@ def parse_custom_format(text):
     
 def parse_course_first_format(text):
     """
-    Parse format with course name first, then tournament name, course name again, city/state, and date range.
+    Parse format with course name first, then tournament name, course again, city/state, and date range.
     Example:
-    Squire Creek Country Club
-    Women's Southern Amateur Championship
-    Squire Creek Country Club
-    Choudrant, LA
-    Jun 02, 2025 - Jun 05, 2025
+    Saginaw Country Club
+    Michigan Super Senior Championship
+    Saginaw Country Club
+    Saginaw, MI
+    Jun 30, 2025 - Jul 01, 2025
     """
     lines = [line.strip() for line in text.split('\n') if line.strip()]
     
     tournaments = []
     i = 0
     
-    while i < len(lines):
-        # Need at least 5 lines for a complete entry
-        if i + 4 >= len(lines):
-            i += 1
-            continue
-        
+    while i + 4 < len(lines):  # Ensure we have at least 5 lines for a complete entry
         # First line should be course name
         course_name_first = lines[i]
-        i += 1
         
         # Second line should be tournament name
-        tournament_name = lines[i]
-        i += 1
+        tournament_name = lines[i+1]
         
-        # Third line should be course name again
-        course_name_second = lines[i]
-        i += 1
+        # Third line should be course name again (might be slightly different)
+        course_name_second = lines[i+2]
         
         # Fourth line should be city, state
-        location_line = lines[i]
-        i += 1
+        location_line = lines[i+3]
         
         # Fifth line should be date range
-        date_line = ""
-        if i < len(lines):
-            date_line = lines[i]
-            i += 1
+        date_line = lines[i+4]
         
-        # Parse location for city and state
-        location_match = re.search(r'(.*?),\s+([A-Z]{2})$', location_line)
-        city = ""
-        state = ""
-        
-        if location_match:
-            city = location_match.group(1).strip()
-            state = location_match.group(2).strip()
-        else:
-            # No clear pattern, try to extract state code
-            state_match = re.search(r'\b([A-Z]{2})\b', location_line)
-            if state_match:
-                state = state_match.group(1)
-                # Try to extract city
-                city_parts = location_line.split(state)
-                if city_parts and city_parts[0]:
-                    city = city_parts[0].rstrip(', ').strip()
+        # Verify this looks like a tournament entry by checking if the first and third lines
+        # are similar (contain the same course name)
+        # We use a less strict check than exact equality
+        if course_name_first.lower() in course_name_second.lower() or course_name_second.lower() in course_name_first.lower():
+            # Parse location for city and state
+            location_match = re.search(r'(.*?),\s+([A-Z]{2})$', location_line)
+            city = ""
+            state = ""
+            
+            if location_match:
+                city = location_match.group(1).strip()
+                state = location_match.group(2).strip()
             else:
-                # Use entire line as city and default state
-                city = location_line
-                state = default_state if default_state else ""
-        
-        # Process date range
-        if "-" in date_line:
-            first_date = date_line.split("-")[0].strip()
-        else:
-            first_date = date_line
-        
-        # Get formatted date
-        date_value = ultra_simple_date_extractor(first_date, year)
-        
-        if date_value:
-            # Use second course name as it's more likely to be accurate
-            final_course_name = course_name_second if course_name_second else course_name_first
+                # No clear pattern, try to extract state code
+                state_match = re.search(r'\b([A-Z]{2})\b', location_line)
+                if state_match:
+                    state = state_match.group(1)
+                    # Try to extract city
+                    city_parts = location_line.split(state)
+                    if city_parts and city_parts[0]:
+                        city = city_parts[0].rstrip(', ').strip()
+                else:
+                    # Use entire line as city and default state
+                    city = location_line
+                    state = default_state if default_state else ""
             
-            # Create tournament entry
-            tournament = {
-                'Date': date_value,
-                'Name': tournament_name.strip(),
-                'Course': final_course_name.strip(),
-                'Category': "Men's",  # Default category
-                'Gender': determine_gender(tournament_name),
-                'City': city,
-                'State': state,
-                'Zip': None
-            }
+            # Process date range
+            if "-" in date_line:
+                first_date = date_line.split("-")[0].strip()
+            else:
+                first_date = date_line
             
-            # Determine category based on tournament name
-            name_lower = tournament_name.lower()
-            if "amateur" in name_lower and "mid-amateur" not in name_lower and "junior" not in name_lower:
-                tournament['Category'] = "Amateur"
-            elif "mid-amateur" in name_lower:
-                tournament['Category'] = "Mid-Amateur"
-            elif "senior" in name_lower:
-                tournament['Category'] = "Seniors"
-            elif "women" in name_lower or "ladies" in name_lower or "girls" in name_lower:
-                tournament['Category'] = "Women's"
-            elif "junior" in name_lower and "girls" not in name_lower:
-                tournament['Category'] = "Junior's"
-            elif "girls junior" in name_lower:
-                tournament['Category'] = "Junior's"
-                tournament['Gender'] = "Women's"
-            elif "four-ball" in name_lower:
-                tournament['Category'] = "Four-Ball"
+            # Get formatted date
+            date_value = ultra_simple_date_extractor(first_date, year)
             
-            tournaments.append(tournament)
+            if date_value:
+                # Use second course name as it's more likely to be accurate
+                final_course_name = course_name_second
+                
+                # Create tournament entry
+                tournament = {
+                    'Date': date_value,
+                    'Name': tournament_name.strip(),
+                    'Course': final_course_name.strip(),
+                    'Category': "Men's",  # Default category
+                    'Gender': determine_gender(tournament_name),
+                    'City': city,
+                    'State': state,
+                    'Zip': None
+                }
+                
+                # Determine category based on tournament name
+                name_lower = tournament_name.lower()
+                if "amateur" in name_lower and "mid-amateur" not in name_lower and "junior" not in name_lower:
+                    tournament['Category'] = "Amateur"
+                elif "mid-amateur" in name_lower:
+                    tournament['Category'] = "Mid-Amateur"
+                elif "senior" in name_lower and "super" not in name_lower:
+                    tournament['Category'] = "Seniors"
+                elif "super senior" in name_lower:
+                    tournament['Category'] = "Super Senior"
+                elif "women" in name_lower or "ladies" in name_lower or "girls" in name_lower:
+                    tournament['Category'] = "Women's"
+                elif "junior" in name_lower and "girls" not in name_lower:
+                    tournament['Category'] = "Junior's"
+                elif "girls junior" in name_lower:
+                    tournament['Category'] = "Junior's"
+                    tournament['Gender'] = "Women's"
+                elif "four-ball" in name_lower:
+                    tournament['Category'] = "Four-Ball"
+                
+                tournaments.append(tournament)
+        
+        # Always move forward by 5 lines to go to the next entry
+        i += 5
     
     # Convert to DataFrame
     if tournaments:
