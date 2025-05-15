@@ -2108,14 +2108,15 @@ def parse_events_with_sections_format(text):
 
 def detect_format(text):
     """Detect which format the text is in."""
-     # Split the text into lines and check for patterns
+    # Split the text into lines and check for patterns
     lines = [line.strip() for line in text.split('\n')]
 
     # Check for Montana format with 3-line pattern: name, date-course, categories
     montana_pattern_count = 0
     for i in range(len(lines) - 2):
         if (len(lines[i]) > 5 and  # Tournament name
-            re.search(r'(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d{1,2},\s+\d{4}\s+-', lines[i+1]) and  # Date - Course
+            " - " in lines[i+1] and  # Date - Course with dash separator
+            re.search(r'(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d{1,2},\s+\d{4}\s+-', lines[i+1]) and  # Date format before dash
             any(category in lines[i+2].lower() for category in ["mens", "womens", "seniors", "juniors", "team", "pro", "am"])):  # Categories
             montana_pattern_count += 1
     
@@ -3210,7 +3211,7 @@ def parse_tournament_text(text):
     
     # New formats
     if format_type == "MONTANA_FORMAT":
-        return parse_montana_format(text)
+        return parse_montana_format_direct(text)
     elif format_type == "MISSOURI_FORMAT":
         return parse_missouri_tournament_format(text)
     elif format_type == "USGA_VIEW_FORMAT":
