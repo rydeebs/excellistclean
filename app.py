@@ -3591,7 +3591,7 @@ if st.button("Process Tournament Data"):
             else:
                 # Only use general format detection as a last resort
                 st.write("Using general format detection - this might not be accurate for your data")
-                format_type = detect_format(text)
+                format_type = detect_format(tournament_text)  # Changed from text to tournament_text
                 st.write(f"Detected format: {format_type}")
                 df = parse_tournament_text(tournament_text)
             
