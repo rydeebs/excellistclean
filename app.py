@@ -2964,10 +2964,147 @@ def parse_championship_format(text):
 
 def parse_schedule_format(text):
     """
-    Parse schedule-style format with date ranges and tournaments on the same line.
-    Format example: 'May 31-June 1 Hot Springs CC Designated Hot Springs CC'
+    Parse schedule-style format with date ranges and tournaments on the same line,
+    but also handle the Montana format pattern correctly.
+    
+    Special handling for Montana-style format:
+    Line 1: Tournament name
+    Line 2: Date - Course, City, State
+    Line 3: Categories
     """
     lines = [line.strip() for line in text.split('\n') if line.strip()]
+    
+    # First check if this matches the Montana pattern
+    # If it does, use the Montana-specific parsing
+    montana_pattern_detected = False
+    
+    # Check for Montana pattern
+    for i in range(len(lines) - 2):
+        if (" - " in lines[i+1] and 
+            any(month in lines[i+1] for month in ["Jan", "Feb", "Mar", "Apr", "May", "Jun", 
+                                                "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]) and
+            any(category in lines[i+2].lower() for category in ["mens", "womens", "seniors", "juniors", "team", "pro", "am"])):
+            montana_pattern_detected = True
+            break
+    
+    if montana_pattern_detected:
+        # Use Montana-specific parsing
+        tournaments = []
+        i = 0
+        
+        while i < len(lines):
+            # Check if we have at least 3 lines (name, date-course, categories)
+            if i + 2 < len(lines):
+                # Check if this is the Montana pattern
+                if (" - " in lines[i+1] and 
+                    any(month in lines[i+1] for month in ["Jan", "Feb", "Mar", "Apr", "May", "Jun", 
+                                                        "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"])):
+                    
+                    # Extract tournament parts
+                    tournament_name = lines[i]
+                    date_course_line = lines[i+1]
+                    category_line = lines[i+2]
+                    
+                    # Split date-course line at dash
+                    parts = date_course_line.split(" - ", 1)
+                    
+                    if len(parts) == 2:
+                        date_part = parts[0].strip()
+                        location_part = parts[1].strip()
+                        
+                        # Parse date
+                        date_value = ultra_simple_date_extractor(date_part, year)
+                        
+                        # Parse location
+                        course = ""
+                        city = ""
+                        state = ""
+                        
+                        location_parts = location_part.split(",")
+                        if location_parts:
+                            course = location_parts[0].strip()
+                            
+                            if len(location_parts) >= 3:
+                                city = location_parts[1].strip()
+                                state = location_parts[2].strip()
+                            elif len(location_parts) == 2:
+                                last_part = location_parts[1].strip()
+                                state_match = re.search(r'([A-Z]{2})$', last_part)
+                                if state_match:
+                                    state = state_match.group(1)
+                                    city = last_part[:-(len(state))].strip()
+                                else:
+                                    city = last_part
+                        
+                        # Parse category
+                        category_line_lower = category_line.lower()
+                        
+                        # Default values
+                        primary_category = "Men's"
+                        gender = "Men's"
+                        
+                        # Determine category
+                        if "juniors" in category_line_lower or "junior" in category_line_lower:
+                            primary_category = "Junior's"
+                        elif "seniors" in category_line_lower or "senior" in category_line_lower:
+                            primary_category = "Seniors"
+                        elif "pro am" in category_line_lower or "pro-am" in category_line_lower:
+                            primary_category = "Pro-Am"
+                        elif "team event" in category_line_lower:
+                            primary_category = "Team"
+                        
+                        # Determine gender
+                        if "womens" in category_line_lower and not "mens" in category_line_lower:
+                            gender = "Women's"
+                        elif "womens" in category_line_lower and "mens" in category_line_lower:
+                            gender = "Mixed"
+                        
+                        # Check name for overrides
+                        name_lower = tournament_name.lower()
+                        if "women" in name_lower or "ladies" in name_lower:
+                            gender = "Women's"
+                        if "amateur" in name_lower:
+                            primary_category = "Amateur"
+                        if "match play" in name_lower:
+                            primary_category = "Match Play"
+                        
+                        # Create tournament entry
+                        if date_value:
+                            tournament = {
+                                'Date': date_value,
+                                'Name': tournament_name,
+                                'Course': course,
+                                'Category': primary_category,
+                                'Gender': gender,
+                                'City': city,
+                                'State': state if state else (default_state if default_state else None),
+                                'Zip': None
+                            }
+                            
+                            tournaments.append(tournament)
+                    
+                    # Move to next tournament (skip 3 lines)
+                    i += 3
+                else:
+                    # Not a Montana pattern, skip to next line
+                    i += 1
+            else:
+                # Not enough lines left, skip to next line
+                i += 1
+        
+        # Return the tournaments as DataFrame
+        if tournaments:
+            tournaments_df = pd.DataFrame(tournaments)
+            
+            # Ensure all required columns exist
+            for col in REQUIRED_COLUMNS:
+                if col not in tournaments_df.columns:
+                    tournaments_df[col] = None
+            
+            return tournaments_df
+    
+    # If we reached here, either it's not a Montana pattern or we found no tournaments
+    # Fall back to original schedule format parser
     
     tournaments = []
     
@@ -3106,6 +3243,7 @@ def parse_schedule_format(text):
     else:
         # Return empty DataFrame with all required columns
         return pd.DataFrame(columns=REQUIRED_COLUMNS)
+
 
 def parse_simple_format(text):
     """Parse simple format with dates followed by course info."""
