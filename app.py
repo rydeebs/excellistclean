@@ -2145,6 +2145,28 @@ def parse_course_first_format(text):
     Michigan Women's Amateur Championship
     ...
     """
+    # Helper function to determine category based on tournament name
+    def determine_category(name):
+        name_lower = name.lower()
+        if "super senior" in name_lower:
+            return "Super Senior"
+        elif "senior" in name_lower and "super" not in name_lower:
+            return "Seniors"
+        elif "women" in name_lower or "ladies" in name_lower:
+            return "Women's"
+        elif "junior" in name_lower or "girls" in name_lower or "boys" in name_lower or "14 & under" in name_lower or "12 & under" in name_lower:
+            return "Junior's"
+        elif "mid-amateur" in name_lower:
+            return "Mid-Amateur"
+        elif "amateur" in name_lower and "mid-amateur" not in name_lower and "junior" not in name_lower and "senior" not in name_lower:
+            return "Amateur"
+        elif "four-ball" in name_lower or "two-person" in name_lower:
+            return "Four-Ball"
+        elif "match play" in name_lower:
+            return "Match Play"
+        else:
+            return "Men's"  # Default category
+    
     lines = [line.strip() for line in text.split('\n') if line.strip()]
     
     tournaments = []
@@ -2212,28 +2234,6 @@ def parse_course_first_format(text):
         else:
             # Not enough lines for another entry, exit the loop
             break
-    
-    # Helper function to determine category based on tournament name
-    def determine_category(name):
-        name_lower = name.lower()
-        if "super senior" in name_lower:
-            return "Super Senior"
-        elif "senior" in name_lower and "super" not in name_lower:
-            return "Seniors"
-        elif "women" in name_lower or "ladies" in name_lower:
-            return "Women's"
-        elif "junior" in name_lower or "girls" in name_lower or "boys" in name_lower or "14 & under" in name_lower or "12 & under" in name_lower:
-            return "Junior's"
-        elif "mid-amateur" in name_lower:
-            return "Mid-Amateur"
-        elif "amateur" in name_lower and "mid-amateur" not in name_lower and "junior" not in name_lower and "senior" not in name_lower:
-            return "Amateur"
-        elif "four-ball" in name_lower or "two-person" in name_lower:
-            return "Four-Ball"
-        elif "match play" in name_lower:
-            return "Match Play"
-        else:
-            return "Men's"  # Default category
     
     # Convert to DataFrame
     if tournaments:
