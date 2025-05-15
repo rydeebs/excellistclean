@@ -4109,7 +4109,74 @@ if st.button("Process Tournament Data"):
                 st.error("No tournaments could be extracted from the text. Please check the format.")
                 df = pd.DataFrame(columns=REQUIRED_COLUMNS)
             else:
-                # ... rest of the display and download logic ...
+                # Print DataFrame information
+                st.write("### DataFrame Details")
+                st.write(f"DataFrame shape: {df.shape}")
+                st.write(f"DataFrame columns: {df.columns.tolist()}")
+                
+                # Ensure Name column has values
+                if 'Name' in df.columns:
+                    st.write("### Name Column Values")
+                    name_values = df['Name'].tolist()
+                    for i, name in enumerate(name_values[:5]):  # Show first 5
+                        st.write(f"Row {i+1}: '{name}' (Type: {type(name).__name__})")
+                
+                # Explicitly ensure columns are in the correct order
+                column_order = REQUIRED_COLUMNS.copy()
+                extra_columns = [col for col in df.columns if col not in REQUIRED_COLUMNS]
+                if extra_columns:
+                    column_order.extend(extra_columns)
+                
+                # Create a new DataFrame with proper column order
+                new_df = pd.DataFrame(columns=column_order)
+                for col in column_order:
+                    if col in df.columns:
+                        new_df[col] = df[col]
+                    else:
+                        new_df[col] = None
+                
+                # Replace original DataFrame
+                df = new_df
+                
+                # Add a separator for clarity
+                st.markdown("---")
+                st.markdown("## Final Results")
+                
+                # Display how many tournaments were found
+                st.success(f"Successfully extracted {len(df)} tournaments!")
+                
+                # Display the full DataFrame without pagination (show all rows)
+                st.write("### Extracted Tournament Data")
+                st.write(df)
+                
+                # Create download buttons for the data
+                csv = df.to_csv(index=False)
+                st.download_button(
+                    label="Download CSV",
+                    data=csv,
+                    file_name=f"{output_filename}.csv",
+                    mime="text/csv"
+                )
+                
+                # Excel download
+                buffer = io.BytesIO()
+                with pd.ExcelWriter(buffer, engine='xlsxwriter') as writer:
+                    df.to_excel(writer, sheet_name='Tournaments', index=False)
+                    
+                    # Auto-adjust columns' width
+                    worksheet = writer.sheets['Tournaments']
+                    for i, col in enumerate(df.columns):
+                        max_len = max(df[col].astype(str).apply(len).max(), len(col)) + 2
+                        worksheet.set_column(i, i, max_len)
+                
+                buffer.seek(0)
+                
+                st.download_button(
+                    label="Download Excel",
+                    data=buffer,
+                    file_name=f"{output_filename}.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                )
         except Exception as e:
             st.error(f"Error processing text: {str(e)}")
             # Show traceback for debugging
