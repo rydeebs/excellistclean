@@ -3875,13 +3875,16 @@ if st.button("Process Tournament Data"):
             st.markdown("---")
             st.markdown("## Processing Tournament Data")
             
-            # Use the force_format_parser instead of parse_tournament_text
-            df = force_format_parser(tournament_text, year, default_state)
+            # Split the text into lines for analysis
+            lines = [line.strip() for line in tournament_text.split('\n') if line.strip()]
             
             # Show first few lines for debugging
             st.write("### Examining input format")
             for i in range(min(9, len(lines))):
                 st.write(f"Line {i+1}: {lines[i]}")
+            
+            # Use the force_format_parser instead of parse_tournament_text
+            df = force_format_parser(tournament_text, year, default_state)
             
             # Is this Montana format?
             montana_format = False
