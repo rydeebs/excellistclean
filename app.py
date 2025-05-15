@@ -4076,98 +4076,40 @@ def process_tournament_data_fixed():
 if st.button("Process Tournament Data"):
     if tournament_text:
         try:
-            # Add a separator for clarity
             st.markdown("---")
             st.markdown("## Processing Tournament Data")
             
-            # Use the direct parser instead of parse_tournament_text
-            df = direct_course_repeat_parser(tournament_text, year, default_state)
+            # Split the text into lines for analysis
+            lines = [line.strip() for line in tournament_text.split('\n') if line.strip()]
             
-            # Check if DataFrame is empty
+            # Show first few lines for debugging
+            st.write("### Examining input format")
+            for i in range(min(9, len(lines))):
+                st.write(f"Line {i+1}: {lines[i]}")
+            
+            # Detect format
+            montana_format, course_repeat_format = detect_tournament_format(lines)
+            
+            # Use appropriate parser based on the format
+            if montana_format:
+                st.write("### Montana format detected - using direct manual parser")
+                df = parse_montana_format_direct(tournament_text)
+            elif course_repeat_format:
+                st.write("### Course-repeating format detected")
+                df = parse_course_repeat_format(tournament_text)
+            elif "View" in tournament_text and re.search(r'(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun),\s+', tournament_text):
+                st.write("### USGA View format detected")
+                df = parse_usga_view_format(tournament_text)
+            else:
+                st.write("### Using general format detection")
+                df = parse_tournament_text(tournament_text)
+            
+            # Process and display results
             if df.empty:
                 st.error("No tournaments could be extracted from the text. Please check the format.")
-                # Create an empty DataFrame with all required columns
                 df = pd.DataFrame(columns=REQUIRED_COLUMNS)
             else:
-                # Print DataFrame information
-                st.write("### DataFrame Details")
-                st.write(f"DataFrame shape: {df.shape}")
-                st.write(f"DataFrame columns: {df.columns.tolist()}")
-                
-                # Ensure all required columns exist
-                for col in REQUIRED_COLUMNS:
-                    if col not in df.columns:
-                        st.warning(f"Adding missing column: {col}")
-                        df[col] = None
-                
-                # Ensure Name column has values
-                if 'Name' in df.columns:
-                    st.write("### Name Column Values")
-                    name_values = df['Name'].tolist()
-                    for i, name in enumerate(name_values[:5]):  # Show first 5
-                        st.write(f"Row {i+1}: '{name}' (Type: {type(name).__name__})")
-                
-                # Explicitly ensure columns are in the correct order
-                column_order = REQUIRED_COLUMNS.copy()
-                extra_columns = [col for col in df.columns if col not in REQUIRED_COLUMNS]
-                if extra_columns:
-                    column_order.extend(extra_columns)
-                
-                # Create a new DataFrame with proper column order
-                new_df = pd.DataFrame(columns=column_order)
-                for col in column_order:
-                    if col in df.columns:
-                        new_df[col] = df[col]
-                    else:
-                        new_df[col] = None
-                
-                # Replace original DataFrame
-                df = new_df
-            
-            # Add a separator for clarity
-            st.markdown("---")
-            st.markdown("## Final Results")
-            
-            # Display how many tournaments were found
-            st.success(f"Successfully extracted {len(df)} tournaments!")
-            
-            # Display the full DataFrame without pagination (show all rows)
-            st.write("### Extracted Tournament Data")
-            st.write(df)
-            
-            # Also show the raw data in table format to ensure all rows are visible
-            st.write("### Tournament Table (All Rows)")
-            st.table(df.head(100))  # Show up to 100 rows in table format
-            
-            # Create download buttons for the data
-            csv = df.to_csv(index=False)
-            st.download_button(
-                label="Download CSV",
-                data=csv,
-                file_name=f"{output_filename}.csv",
-                mime="text/csv"
-            )
-            
-            # Excel download
-            buffer = io.BytesIO()
-            with pd.ExcelWriter(buffer, engine='xlsxwriter') as writer:
-                df.to_excel(writer, sheet_name='Tournaments', index=False)
-                
-                # Auto-adjust columns' width
-                worksheet = writer.sheets['Tournaments']
-                for i, col in enumerate(df.columns):
-                    max_len = max(df[col].astype(str).apply(len).max(), len(col)) + 2
-                    worksheet.set_column(i, i, max_len)
-            
-            buffer.seek(0)
-            
-            st.download_button(
-                label="Download Excel",
-                data=buffer,
-                file_name=f"{output_filename}.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            )
-            
+                # ... rest of the display and download logic ...
         except Exception as e:
             st.error(f"Error processing text: {str(e)}")
             # Show traceback for debugging
@@ -4175,3 +4117,84 @@ if st.button("Process Tournament Data"):
             st.code(traceback.format_exc())
     else:
         st.error("Please enter tournament text data.")
+
+def create_tournament_dataframe(tournaments, format_name=""):
+    """Helper function to create and standardize tournament DataFrames"""
+    if tournaments:
+        if format_name:
+            st.write(f"Debug: Found {len(tournaments)} tournaments in {format_name} format")
+        
+        tournaments_df = pd.DataFrame(tournaments)
+        
+        # Ensure all required columns exist
+        for col in REQUIRED_COLUMNS:
+            if col not in tournaments_df.columns:
+                tournaments_df[col] = None
+                
+        return tournaments_df
+    else:
+        # Return empty DataFrame with all required columns
+        return pd.DataFrame(columns=REQUIRED_COLUMNS)
+
+def detect_tournament_format(lines):
+    """Consolidated format detection logic"""
+    # Check for Montana format
+    montana_format = False
+    for i in range(len(lines) - 2):
+        if (len(lines[i]) > 5 and  # Tournament name
+            " - " in lines[i+1] and  # Date - Course with dash separator
+            any(month in lines[i+1] for month in ["Jan", "Feb", "Mar", "Apr", "May", "Jun", 
+                                                "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]) and
+            any(category in lines[i+2].lower() for category in ["mens", "womens", "seniors", "juniors", "team", "pro", "am"])):
+            montana_format = True
+            break
+    
+    # Check for course-repeating format
+    course_repeat_format = False
+    i = 0
+    while i < len(lines):
+        if i + 4 < len(lines) and all(lines[i+j] for j in range(5)):
+            if lines[i] == lines[i+2]:
+                if re.search(r'.*?,\s+[A-Z]{2}', lines[i+3]):
+                    if any(month in lines[i+4] for month in ["Jan", "Feb", "Mar", "Apr", "May", "Jun", 
+                                                           "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]):
+                        course_repeat_format = True
+                        break
+        i += 1
+    
+    return montana_format, course_repeat_format
+
+def determine_tournament_category_and_gender(tournament_name, category_line=""):
+    """Helper function to determine tournament category and gender"""
+    name_lower = tournament_name.lower()
+    category_line_lower = category_line.lower()
+    
+    # Default values
+    primary_category = "Men's"
+    gender = "Men's"
+    
+    # Determine category
+    if "juniors" in category_line_lower or "junior" in name_lower:
+        primary_category = "Junior's"
+    elif "seniors" in category_line_lower or "senior" in name_lower:
+        primary_category = "Seniors"
+    elif "pro am" in category_line_lower or "pro-am" in name_lower:
+        primary_category = "Pro-Am"
+    elif "team event" in category_line_lower:
+        primary_category = "Team"
+    elif "amateur" in name_lower and "mid-amateur" not in name_lower:
+        primary_category = "Amateur"
+    elif "mid-amateur" in name_lower:
+        primary_category = "Mid-Amateur"
+    elif "match play" in name_lower:
+        primary_category = "Match Play"
+    
+    # Determine gender
+    if "womens" in category_line_lower and not "mens" in category_line_lower:
+        gender = "Women's"
+    elif "womens" in category_line_lower and "mens" in category_line_lower:
+        gender = "Mixed"
+    elif "women" in name_lower or "ladies" in name_lower:
+        gender = "Women's"
+    
+    return primary_category, gender
