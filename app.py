@@ -1592,8 +1592,31 @@ def parse_montana_format(text):
                             city = location_part.replace(state, "").strip()
                             if city.endswith(","):
                                 city = city[:-1].strip()
+                        else:
+                            # No state code found, assume it's a city
+                            city = location_part
+                            # Check if this is a state name we can convert
+                            state_names = {
+                                "Montana": "MT", "Idaho": "ID", "Wyoming": "WY", 
+                                "Washington": "WA", "Oregon": "OR", "North Dakota": "ND"
+                            }
+                            for state_name, code in state_names.items():
+                                if state_name in location_part:
+                                    state = code
+                                    city = location_part.replace(state_name, "").strip()
+                                    if city.endswith(","):
+                                        city = city[:-1].strip()
+                                    break
                 
-                # Extract date using our simple date extractor
+                # Convert full state names to abbreviations
+                if state == "Montana":
+                    state = "MT"
+                elif state == "Idaho":
+                    state = "ID"
+                elif state == "Wyoming":
+                    state = "WY"
+                
+                # Extract date using our date extractor
                 date_value = ultra_simple_date_extractor(date_text, year)
                 
                 # Determine categories based on the categories line
@@ -1652,6 +1675,14 @@ def parse_montana_format(text):
                         'State': state if state else (default_state if default_state else None),
                         'Zip': None
                     }
+                    
+                    # Debug output - uncomment if needed
+                    # st.write(f"Adding tournament: {tournament_name}")
+                    # st.write(f"  Date: {date_value}")
+                    # st.write(f"  Course: {course}")
+                    # st.write(f"  City: {city}, State: {state}")
+                    # st.write(f"  Category: {primary_category}, Gender: {gender}")
+                    
                     tournaments.append(tournament)
                 
                 # Move to next group of 3 lines
@@ -1675,9 +1706,14 @@ def parse_montana_format(text):
             if col not in tournaments_df.columns:
                 tournaments_df[col] = None
                 
+        # Diagnostic - Display the actual data before returning
+        st.write("Sample of parsed Montana tournaments:")
+        st.write(tournaments_df.head(3))
+        
         return tournaments_df
     else:
         # Return empty DataFrame with all required columns
+        st.write("No tournaments found in Montana format")
         return pd.DataFrame(columns=REQUIRED_COLUMNS)
     
 def parse_name_date_course_format(text):
@@ -3454,25 +3490,75 @@ def ensure_column_order(df):
 if st.button("Process Tournament Data"):
     if tournament_text:
         try:
-            # Special case for USGA format with "View" pattern
-            if "View" in tournament_text and "US " in tournament_text and re.search(r'(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun),\s+', tournament_text):
+            # Check for specific formats first, before using general format detection
+            
+            # Check for Montana format directly (name, date-course, categories pattern)
+            montana_pattern_count = 0
+            lines = [line.strip() for line in tournament_text.split('\n') if line.strip()]
+            
+            for i in range(len(lines) - 2):
+                if (len(lines[i]) > 5 and  # Tournament name
+                    re.search(r'(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d{1,2},\s+\d{4}\s+-', lines[i+1]) and  # Date - Course
+                    any(category in lines[i+2].lower() for category in ["mens", "womens", "seniors", "juniors", "team", "pro", "am"])):  # Categories
+                    montana_pattern_count += 1
+            
+            if montana_pattern_count >= 1:
+                st.write(f"Detected Montana format with {montana_pattern_count} tournament entries")
+                df = parse_montana_format(tournament_text)
+            
+            # Check for USGA view format (Name, View, Date, Course pattern)
+            elif "View" in tournament_text and re.search(r'(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun),\s+', tournament_text):
+                st.write("Detected USGA View format")
                 df = parse_usga_view_format(tournament_text)
+            
+            # Check for Missouri format (day number, month, tournament name pattern)
+            elif any(line.isdigit() and 1 <= int(line) <= 31 for line in lines[:10]) and any(month in " ".join(lines[:10]).lower() for month in ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"]):
+                st.write("Detected Missouri format")
+                df = parse_missouri_tournament_format(tournament_text)
+            
+            # If no specific format detected, use general format detection
             else:
                 # Parse using regular format detection
                 df = parse_tournament_text(tournament_text)
             
-            # Ensure Gender is set for all rows
-            if 'Name' in df.columns:
-                df['Gender'] = df['Name'].apply(determine_gender)
-            
-            # Ensure columns are in the correct order
-            df = ensure_column_order(df)
+            # Check if DataFrame is empty
+            if df.empty:
+                st.error("No tournaments could be extracted from the text. Please check the format.")
+                # Create an empty DataFrame with all required columns
+                df = pd.DataFrame(columns=REQUIRED_COLUMNS)
+            else:
+                # Show detailed information about the raw extracted data for debugging
+                st.write("### Raw Extracted Data (First few rows)")
+                display_df = df.head(3).copy()
+                # Convert any complex objects to strings for display
+                for col in display_df.columns:
+                    display_df[col] = display_df[col].apply(lambda x: str(x) if x is not None else None)
+                st.write(display_df)
+                
+                # Ensure all required columns exist
+                for col in REQUIRED_COLUMNS:
+                    if col not in df.columns:
+                        df[col] = None
+                
+                # Ensure Name column is populated - Check if we have empty names but valid courses
+                if 'Name' in df.columns and 'Course' in df.columns:
+                    empty_names = df['Name'].isnull() | (df['Name'] == '')
+                    if empty_names.any() and df.loc[empty_names, 'Course'].notna().any():
+                        st.warning(f"Found {empty_names.sum()} entries with missing names but valid courses. Using course names as tournament names.")
+                        df.loc[empty_names, 'Name'] = df.loc[empty_names, 'Course'] + " Tournament"
+                
+                # Ensure Gender is set for all rows
+                if 'Name' in df.columns and 'Gender' in df.columns:
+                    df['Gender'] = df.apply(lambda row: row['Gender'] if pd.notna(row['Gender']) else determine_gender(row['Name']), axis=1)
+                
+                # Ensure columns are in the correct order
+                df = ensure_column_order(df)
             
             # Display how many tournaments were found
             st.success(f"Successfully extracted {len(df)} tournaments!")
             
-            # Display the full DataFrame without pagination (show all rows)
-            st.write("### Extracted Tournament Data")
+            # Display the DataFrame after all processing
+            st.write("### Processed Tournament Data")
             st.write(df)
             
             # Also show the raw data in table format to ensure all rows are visible
