@@ -3496,171 +3496,89 @@ default_state = st.selectbox(
 output_filename = st.text_input("Output Filename (without extension):", "golf_tournaments")
 
 def ensure_column_order(df):
-    """
-    Ensure DataFrame columns are in the correct order and all required columns exist.
-    This version has extra debugging to ensure the Name column is preserved.
-    """
-    # Debug: Show incoming DataFrame columns
-    st.write(f"Before column ordering - columns: {df.columns.tolist()}")
+    """Ensure DataFrame columns are in the correct order."""
+    # Get all columns that exist in the DataFrame
+    existing_columns = [col for col in REQUIRED_COLUMNS if col in df.columns]
     
-    # Check if Name column exists
-    if 'Name' in df.columns:
-        # Check if Name column has values
-        empty_names = df['Name'].isnull() | (df['Name'] == '')
-        if empty_names.any():
-            st.warning(f"Found {empty_names.sum()} rows with empty Name values")
-            # Fix empty names with Course values if available
-            if 'Course' in df.columns:
-                df.loc[empty_names, 'Name'] = df.loc[empty_names, 'Course'] + " Tournament"
-        
-        # Show sample of Name column values
-        st.write("Sample of Name column values:")
-        for i, name in enumerate(df['Name'].head(3)):
-            st.write(f"  Row {i+1}: '{name}'")
-    else:
-        st.error("Name column is missing! Adding it from Course column.")
-        if 'Course' in df.columns:
-            df['Name'] = df['Course'] + " Tournament"
-        else:
-            df['Name'] = "Unknown Tournament"
+    # Add any additional columns that might exist
+    other_columns = [col for col in df.columns if col not in REQUIRED_COLUMNS]
     
-    # Make sure all required columns exist
-    for col in REQUIRED_COLUMNS:
-        if col not in df.columns:
-            st.warning(f"Adding missing column: {col}")
-            df[col] = None
-    
-    # Reorder columns - put required columns first, then any additional columns
-    ordered_columns = REQUIRED_COLUMNS + [col for col in df.columns if col not in REQUIRED_COLUMNS]
-    
-    # Debug: Show final column order
-    st.write(f"After column ordering - columns: {ordered_columns}")
-    
-    # Return the properly ordered DataFrame
-    return df[ordered_columns]
+    # Reorder columns
+    return df[existing_columns + other_columns]
 
-# Process button with forced Montana format detection
+# Process button
 if st.button("Process Tournament Data"):
     if tournament_text:
         try:
-            # Add a separator for clarity
-            st.markdown("---")
-            st.markdown("## Processing Tournament Data")
+            # Check for specific formats first, before using general format detection
             
-            # Check for Montana format pattern - specifically looking for the 3-line pattern
+            # Check for Montana format directly (name, date-course, categories pattern)
             montana_pattern_count = 0
             lines = [line.strip() for line in tournament_text.split('\n') if line.strip()]
             
-            # Show first few lines for debugging
-            st.write("### Examining input format")
-            st.write("First few lines:")
-            for i in range(min(9, len(lines))):
-                st.write(f"Line {i+1}: {lines[i]}")
-            
-            # Check for 3-line pattern:
-            # Line 1: Tournament name
-            # Line 2: Date - Course, City, State
-            # Line 3: Categories
-            montana_format = False
             for i in range(len(lines) - 2):
                 if (len(lines[i]) > 5 and  # Tournament name
                     re.search(r'(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d{1,2},\s+\d{4}\s+-', lines[i+1]) and  # Date - Course
-                    any(keyword in lines[i+2].lower() for keyword in ["mens", "womens", "seniors", "juniors", "team", "pro", "am"])):  # Categories
+                    any(category in lines[i+2].lower() for category in ["mens", "womens", "seniors", "juniors", "team", "pro", "am"])):  # Categories
                     montana_pattern_count += 1
-                    
-                    # Show a match for debugging
-                    if montana_pattern_count == 1:
-                        st.write("Found Montana format pattern:")
-                        st.write(f"Line {i+1} (Name): {lines[i]}")
-                        st.write(f"Line {i+2} (Date-Course): {lines[i+1]}")
-                        st.write(f"Line {i+3} (Categories): {lines[i+2]}")
-                        montana_format = True
             
-            # IMPORTANT: If we find Montana pattern, force using Montana parser
-            if montana_format:
-                st.write(f"Forcing Montana format parser (found {montana_pattern_count} tournament patterns)")
+            if montana_pattern_count >= 1:
+                st.write(f"Detected Montana format with {montana_pattern_count} tournament entries")
                 df = parse_montana_format(tournament_text)
-            # USGA format check
+            
+            # Check for USGA view format (Name, View, Date, Course pattern)
             elif "View" in tournament_text and re.search(r'(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun),\s+', tournament_text):
                 st.write("Detected USGA View format")
                 df = parse_usga_view_format(tournament_text)
-            # Missouri format check
+            
+            # Check for Missouri format (day number, month, tournament name pattern)
             elif any(line.isdigit() and 1 <= int(line) <= 31 for line in lines[:10]) and any(month in " ".join(lines[:10]).lower() for month in ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"]):
                 st.write("Detected Missouri format")
                 df = parse_missouri_tournament_format(tournament_text)
+            
+            # If no specific format detected, use general format detection
             else:
-                # Only use general format detection as a last resort
-                st.write("Using general format detection - this might not be accurate for your data")
-                format_type = detect_format(text)
-                st.write(f"Detected format: {format_type}")
+                # Parse using regular format detection
                 df = parse_tournament_text(tournament_text)
             
             # Check if DataFrame is empty
             if df.empty:
-                st.error("No tournaments could be extracted from the text. Trying Montana format as fallback...")
-                # Try Montana format as a fallback
-                df = parse_montana_format(tournament_text)
-                
-                if df.empty:
-                    st.error("Still no tournaments found. Please check the format.")
-                    # Create an empty DataFrame with all required columns
-                    df = pd.DataFrame(columns=REQUIRED_COLUMNS)
-            
-            # Print the DataFrame details for debugging
-            st.write("### DataFrame Details Before Final Processing")
-            st.write(f"DataFrame shape: {df.shape}")
-            st.write(f"DataFrame columns: {df.columns.tolist()}")
-            
-            # Now look specifically at the Name column
-            if 'Name' in df.columns:
-                st.write("### Name Column Values")
-                name_values = df['Name'].tolist()
-                for i, name in enumerate(name_values[:5]):  # Show first 5
-                    st.write(f"Row {i+1}: '{name}' (Type: {type(name).__name__})")
+                st.error("No tournaments could be extracted from the text. Please check the format.")
+                # Create an empty DataFrame with all required columns
+                df = pd.DataFrame(columns=REQUIRED_COLUMNS)
             else:
-                st.error("Name column is missing from the DataFrame!")
-                # Add Name column if missing
-                if 'Course' in df.columns:
-                    df['Name'] = df['Course'] + " Tournament"
-                else:
-                    df['Name'] = "Unknown Tournament"
-            
-            # Ensure all required columns exist
-            for col in REQUIRED_COLUMNS:
-                if col not in df.columns:
-                    st.warning(f"Adding missing column: {col}")
-                    df[col] = None
-            
-            # Enforce proper column order
-            column_order = REQUIRED_COLUMNS.copy()
-            extra_columns = [col for col in df.columns if col not in REQUIRED_COLUMNS]
-            if extra_columns:
-                column_order.extend(extra_columns)
-            
-            # Log before reordering
-            st.write(f"Original columns: {df.columns.tolist()}")
-            st.write(f"Reordering to: {column_order}")
-            
-            # Create a new DataFrame with the correct column order
-            new_df = pd.DataFrame(columns=column_order)
-            for col in column_order:
-                if col in df.columns:
-                    new_df[col] = df[col]
-                else:
-                    new_df[col] = None
-            
-            # Replace the original DataFrame
-            df = new_df
-            
-            # Add a separator for clarity
-            st.markdown("---")
-            st.markdown("## Final Results")
+                # Show detailed information about the raw extracted data for debugging
+                st.write("### Raw Extracted Data (First few rows)")
+                display_df = df.head(3).copy()
+                # Convert any complex objects to strings for display
+                for col in display_df.columns:
+                    display_df[col] = display_df[col].apply(lambda x: str(x) if x is not None else None)
+                st.write(display_df)
+                
+                # Ensure all required columns exist
+                for col in REQUIRED_COLUMNS:
+                    if col not in df.columns:
+                        df[col] = None
+                
+                # Ensure Name column is populated - Check if we have empty names but valid courses
+                if 'Name' in df.columns and 'Course' in df.columns:
+                    empty_names = df['Name'].isnull() | (df['Name'] == '')
+                    if empty_names.any() and df.loc[empty_names, 'Course'].notna().any():
+                        st.warning(f"Found {empty_names.sum()} entries with missing names but valid courses. Using course names as tournament names.")
+                        df.loc[empty_names, 'Name'] = df.loc[empty_names, 'Course'] + " Tournament"
+                
+                # Ensure Gender is set for all rows
+                if 'Name' in df.columns and 'Gender' in df.columns:
+                    df['Gender'] = df.apply(lambda row: row['Gender'] if pd.notna(row['Gender']) else determine_gender(row['Name']), axis=1)
+                
+                # Ensure columns are in the correct order
+                df = ensure_column_order(df)
             
             # Display how many tournaments were found
             st.success(f"Successfully extracted {len(df)} tournaments!")
             
-            # Display the full DataFrame without pagination (show all rows)
-            st.write("### Extracted Tournament Data")
+            # Display the DataFrame after all processing
+            st.write("### Processed Tournament Data")
             st.write(df)
             
             # Also show the raw data in table format to ensure all rows are visible
