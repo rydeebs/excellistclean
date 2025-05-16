@@ -723,6 +723,109 @@ def parse_usga_view_format(text):
         # Return empty DataFrame with all required columns
         return pd.DataFrame(columns=REQUIRED_COLUMNS)
 
+def detect_and_parse_nnga_format(text, year="2025"):
+    """
+    Custom function to properly detect and parse the NNGA tournament format.
+    This is designed to handle the specific input format you provided.
+    """
+    lines = [line.strip() for line in text.split('\n') if line.strip()]
+    
+    # First, check if this is likely the NNGA format
+    # Criteria: Contains multiple "View" lines, and lines with dates starting with day abbreviations
+    view_count = sum(1 for line in lines if line == "View")
+    day_prefix_count = sum(1 for line in lines if re.match(r'^(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun),', line))
+    
+    # If we don't have enough "View" lines or date lines, it's not this format
+    if view_count < 3 or day_prefix_count < 3:
+        return pd.DataFrame(columns=["Date", "Name", "Course", "Category", "Gender", "City", "State", "Zip"])
+    
+    # We've confirmed this is likely the NNGA format, now parse it
+    tournaments = []
+    i = 0
+    
+    # Process all entries
+    while i < len(lines):
+        # Look for the pattern: Name -> View -> Date -> Course
+        if i + 3 < len(lines) and lines[i+1] == "View":
+            tournament_name = lines[i]
+            date_line = lines[i+2]
+            course_name = lines[i+3]
+            
+            # Extract date using ultra_simple_date_extractor
+            # This is more flexible than regex for handling various date formats
+            date_value = None
+            
+            # Check if this is a date range
+            if "-" in date_line:
+                # Just get the first date
+                first_date_part = date_line.split("-")[0].strip()
+                date_value = ultra_simple_date_extractor(first_date_part, year)
+            else:
+                # Single date
+                date_value = ultra_simple_date_extractor(date_line, year)
+            
+            # If we got a valid date and have all required pieces, create a tournament entry
+            if date_value and course_name:
+                # Determine gender based on tournament name
+                gender = "Men's"  # Default
+                if "Women's" in tournament_name or "Ladies" in tournament_name or "Girls'" in tournament_name:
+                    gender = "Women's"
+                
+                # Determine category based on tournament name
+                category = "Men's"  # Default
+                
+                name_lower = tournament_name.lower()
+                if "mid-amateur" in name_lower:
+                    category = "Mid-Amateur"
+                elif "match play" in name_lower:
+                    category = "Match Play"
+                elif "senior" in name_lower and "net" not in name_lower:
+                    category = "Seniors"
+                elif "junior" in name_lower:
+                    category = "Junior's"
+                elif "amateur" in name_lower and "mid-amateur" not in name_lower:
+                    category = "Amateur"
+                elif "four-ball" in name_lower or "two-man" in name_lower or "2-man" in name_lower or "team" in name_lower:
+                    category = "Four-Ball"
+                elif "net" in name_lower:
+                    category = "Net"
+                elif "champions" in name_lower:
+                    category = "Champions"
+                
+                # Create tournament entry
+                tournament = {
+                    'Date': date_value,
+                    'Name': tournament_name,
+                    'Course': course_name,
+                    'Category': category,
+                    'Gender': gender,
+                    'City': None,
+                    'State': None,
+                    'Zip': None
+                }
+                
+                tournaments.append(tournament)
+            
+            # Move to next potential tournament
+            i += 4
+        else:
+            # Pattern doesn't match, try next line
+            i += 1
+    
+    # Convert to DataFrame
+    if tournaments:
+        tournaments_df = pd.DataFrame(tournaments)
+        
+        # Ensure all required columns exist
+        for col in ["Date", "Name", "Course", "Category", "Gender", "City", "State", "Zip"]:
+            if col not in tournaments_df.columns:
+                tournaments_df[col] = None
+                
+        return tournaments_df
+    else:
+        # Return empty DataFrame with required columns
+        return pd.DataFrame(columns=["Date", "Name", "Course", "Category", "Gender", "City", "State", "Zip"])
+
 def parse_four_line_format(text):
     """
     Parse format with tournament details on four separate lines:
@@ -3459,7 +3562,7 @@ if st.button("Process Tournament Data"):
             # If no specific format detected, use general format detection
             else:
                 # Parse using regular format detection
-                df = parse_tournament_text(tournament_text)
+                df = detect_and_parse_nnga_format(tournament_text, year)
             
             # Check if DataFrame is empty
             if df.empty:
