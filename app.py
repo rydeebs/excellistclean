@@ -519,6 +519,7 @@ def parse_gam_championship_format(text):
 def parse_usga_qualifier_format(text):
     """
     Parse USGA qualifier format with tournament name, View, date, and course.
+    Modified to ensure all tournaments are captured correctly.
     Example:
     2025 US Girls' Junior Amateur Qualifying
     View
@@ -536,23 +537,37 @@ def parse_usga_qualifier_format(text):
         'Jul': '07', 'Aug': '08', 'Sep': '09', 'Oct': '10', 'Nov': '11', 'Dec': '12'
     }
     
+    # Process lines in blocks of 4
     while i + 3 < len(lines):  # Need at least 4 lines for a complete entry
-        # Check if this looks like a tournament entry (second line is "View")
-        if i + 1 < len(lines) and lines[i + 1] == "View":
+        # Check if this pattern matches the expected format
+        if lines[i+1] == "View" and re.search(r'^(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun),', lines[i+2]):
             # Extract information
             tournament_name = lines[i]
-            date_line = lines[i + 2] if i + 2 < len(lines) else ""
-            course_name = lines[i + 3] if i + 3 < len(lines) else ""
+            date_line = lines[i+2]
+            course_name = lines[i+3]
             
             # Process date line (Thu, Jun 12, 2025 -> Jun 12, 2025)
             date_value = None
-            date_match = re.search(r'^(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun),\s+(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+(\d{1,2}),\s+(\d{4})$', date_line)
+            date_match = re.search(r'^(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun),\s+(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+(\d{1,2}),?\s+(\d{4})$', date_line)
+            
             if date_match:
                 month, day, yr = date_match.groups()
                 date_value = f"{yr}-{month_dict[month]}-{day.zfill(2)}"
             else:
-                # Fallback to general date extractor
-                date_value = ultra_simple_date_extractor(date_line, year)
+                # Try another date pattern for date ranges
+                range_match = re.search(r'^(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun),\s+(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+(\d{1,2})\s+-\s+(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun),\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d{1,2},?\s+(\d{4})$', date_line)
+                if range_match:
+                    month, day, yr = range_match.groups()
+                    date_value = f"{yr}-{month_dict[month]}-{day.zfill(2)}"
+                else:
+                    # Try a simpler pattern for date ranges
+                    simple_match = re.search(r'^(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun),\s+(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+(\d{1,2})\s+-\s+(?:Sun|Mon|Tue|Wed|Thu|Fri|Sat),\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d{1,2},\s+(\d{4})$', date_line)
+                    if simple_match:
+                        month, day, yr = simple_match.groups()
+                        date_value = f"{yr}-{month_dict[month]}-{day.zfill(2)}"
+                    else:
+                        # Last fallback - use ultra_simple_date_extractor
+                        date_value = ultra_simple_date_extractor(date_line, year)
             
             # Determine category and gender based on name
             category = "Amateur"
@@ -573,8 +588,12 @@ def parse_usga_qualifier_format(text):
                 category = "Junior's"
             elif "Mid-Amateur" in tournament_name:
                 category = "Mid-Amateur"
-            elif "Four-Ball" in tournament_name:
+            elif "Four-Ball" in tournament_name or "2-Man" in tournament_name:
                 category = "Four-Ball"
+            elif "Match Play" in tournament_name:
+                category = "Match Play"
+            elif "Amateur" in tournament_name and "Mid-Amateur" not in tournament_name:
+                category = "Amateur"
                 
             # Create tournament entry
             if date_value and course_name:
@@ -599,107 +618,8 @@ def parse_usga_qualifier_format(text):
     
     # Convert to DataFrame
     if tournaments:
-        st.write(f"Debug: Found {len(tournaments)} tournaments in USGA qualifier format")
+        st.write(f"Found {len(tournaments)} tournaments in USGA qualifier format")
         
-        tournaments_df = pd.DataFrame(tournaments)
-        
-        # Ensure all required columns exist
-        for col in REQUIRED_COLUMNS:
-            if col not in tournaments_df.columns:
-                tournaments_df[col] = None
-                
-        return tournaments_df
-    else:
-        # Return empty DataFrame with all required columns
-        return pd.DataFrame(columns=REQUIRED_COLUMNS)
-    
-def parse_usga_qualifier_expanded_format(text):
-    """
-    Parse expanded USGA qualifier format with tournament name, date, course and golfers.
-    This handles the pattern:
-    Tournament Name
-    Date Line (like Mon, Jun 2, 2025)
-    Course: <Course Name>
-    Golfers: <Count>
-    View
-    """
-    # Split the text into lines and remove empty lines
-    lines = [line.strip() for line in text.split('\n') if line.strip()]
-    
-    tournaments = []
-    i = 0
-    
-    while i < len(lines):
-        # Look for tournament name followed by date line with day of week
-        if (i < len(lines) and 
-            i+1 < len(lines) and 
-            i+2 < len(lines) and 
-            re.match(r'^(Mon|Tue|Wed|Thu|Fri|Sat|Sun),\s+[A-Za-z]{3}\s+\d{1,2},\s+\d{4}$', lines[i+1])):
-            
-            tournament_data = {col: None for col in REQUIRED_COLUMNS}
-            
-            # This is a tournament name
-            tournament_data['Name'] = lines[i].strip()
-            
-            # Next line is date
-            date_line = lines[i+1]
-            tournament_data['Date'] = ultra_simple_date_extractor(date_line, year)
-            
-            # Look for course information
-            course_line_idx = -1
-            for j in range(i+2, min(i+5, len(lines))):
-                if lines[j].startswith("Course:"):
-                    course_line_idx = j
-                    course_name = lines[j][len("Course:"):].strip()
-                    tournament_data['Course'] = course_name
-                    break
-            
-            # Set default category and gender based on tournament name
-            name = tournament_data['Name']
-            if name:
-                # Category
-                if "Amateur" in name and "Four-Ball" not in name:
-                    tournament_data['Category'] = "Amateur"
-                elif "Senior" in name:
-                    tournament_data['Category'] = "Seniors"
-                elif "Women" in name or "Ladies" in name or "Girls'" in name:
-                    tournament_data['Category'] = "Women's"
-                elif "Junior" in name or "Boys'" in name:
-                    tournament_data['Category'] = "Junior's"
-                elif "Mid-Amateur" in name:
-                    tournament_data['Category'] = "Mid-Amateur"
-                elif "Four-Ball" in name:
-                    tournament_data['Category'] = "Four-Ball"
-                else:
-                    tournament_data['Category'] = "Men's"  # Default category
-                
-                # Gender
-                tournament_data['Gender'] = determine_gender(name)
-            
-            # Set default state if provided
-            if default_state:
-                tournament_data['State'] = default_state
-            
-            # Skip ahead to after the View line or end of this entry
-            view_line_idx = -1
-            for j in range(i+2, min(i+7, len(lines))):
-                if lines[j] == "View":
-                    view_line_idx = j
-                    i = j + 1  # Set i to after the View line
-                    break
-            
-            # If we didn't find a View line, just skip ahead a reasonable amount
-            if view_line_idx == -1:
-                i += 5
-            
-            # Add tournament to the list if we have essential data
-            if tournament_data['Name'] and tournament_data['Date']:
-                tournaments.append(tournament_data)
-        else:
-            i += 1
-    
-    # Convert to DataFrame
-    if tournaments:
         tournaments_df = pd.DataFrame(tournaments)
         
         # Ensure all required columns exist
