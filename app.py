@@ -1527,157 +1527,213 @@ def parse_montana_format(text):
     May 19, 2025 - Larchmont GC, Missoula, MT
     team event pro am
     """
-    lines = [line.strip() for line in text.split('\n') if line.strip()]
+    # Display version for debugging
+    st.write("Running Montana parser v2.1")
     
+    # Split into lines and remove empty lines
+    lines = [line.strip() for line in text.split('\n') if line.strip()]
+    st.write(f"Total lines after cleaning: {len(lines)}")
+    
+    # Create a raw data display that we'll use for debugging
+    debug_data = []
+    
+    # Skip month headers like "june", "july", etc.
+    month_headers = ["january", "february", "march", "april", "may", "june", 
+                   "july", "august", "september", "october", "november", "december"]
+    
+    # Process the text
     tournaments = []
     i = 0
     
-    # Skip any month headers like "june", "july", etc.
-    month_headers = ["january", "february", "march", "april", "may", "june", 
-                    "july", "august", "september", "october", "november", "december"]
-    
-    # Process in groups of 3 lines
-    while i + 2 < len(lines):
+    while i < len(lines):
         try:
             # Skip month headers
             if lines[i].lower() in month_headers and len(lines[i]) < 10:
+                st.write(f"Skipping month header: '{lines[i]}'")
                 i += 1
                 continue
             
-            # Check if this looks like a tournament entry
-            tournament_name = lines[i]
-            date_course_line = lines[i+1]
-            categories_line = lines[i+2].lower() if i+2 < len(lines) else ""
-            
-            # Basic validation - check if second line has a date and dash
-            has_date_format = re.search(r'(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d{1,2},\s+\d{4}\s+-', date_course_line)
-            
-            category_keywords = ["mens", "men", "womens", "women", "seniors", "senior", 
-                               "juniors", "junior", "team", "event", "pro", "am"]
-            
-            has_categories = any(keyword in categories_line for keyword in category_keywords)
-            
-            if has_date_format and has_categories:
-                # This is a match for our pattern
+            # Get 3 lines for a potential tournament entry
+            if i + 2 < len(lines):
+                # Extract the three lines
+                line1 = lines[i]
+                line2 = lines[i+1]
+                line3 = lines[i+2]
                 
-                # Parse the date and location from second line
-                date_parts = date_course_line.split(" - ")
-                date_text = date_parts[0].strip()
+                # Verify the second line has a date and dash
+                date_dash_pattern = r'^([A-Za-z]+ \d{1,2}, \d{4})\s+-\s+(.+)$'
+                date_match = re.search(date_dash_pattern, line2)
                 
-                # Process location part (after the dash)
-                location_text = date_parts[1].strip() if len(date_parts) > 1 else ""
+                # Check if the third line has category keywords
+                category_keywords = ["mens", "men", "womens", "women", "seniors", "senior", 
+                                  "juniors", "junior", "team", "event", "pro", "am"]
+                has_categories = any(keyword in line3.lower() for keyword in category_keywords)
                 
-                # Split location into course, city, state
-                course = ""
-                city = ""
-                state = ""
-                
-                if location_text and "," in location_text:
-                    location_parts = location_text.split(",")
+                if date_match and has_categories:
+                    # This looks like a valid tournament entry
+                    # Line 1: Tournament name
+                    tournament_name = line1
                     
-                    course = location_parts[0].strip()
+                    # Line 2: Date - Course, City, State
+                    date_text = date_match.group(1)  # Date part
+                    location_text = date_match.group(2)  # Everything after the dash
                     
+                    # Format the date
+                    date_value = ultra_simple_date_extractor(date_text, year)
+                    
+                    # Split location into parts
+                    course = ""
+                    city = ""
+                    state = ""
+                    
+                    # First extract the course (before first comma)
+                    location_parts = location_text.split(',')
+                    if location_parts:
+                        course = location_parts[0].strip()
+                    
+                    # Then extract city and state
                     if len(location_parts) >= 3:
+                        # Format: Course, City, State
                         city = location_parts[1].strip()
                         state = location_parts[2].strip()
                     elif len(location_parts) == 2:
-                        # Try to parse city and state from second part
+                        # Format: Course, City State
                         location_part = location_parts[1].strip()
                         
-                        # Look for 2-letter state code at the end
-                        state_match = re.search(r'\b([A-Z]{2})\b', location_part)
+                        # Look for state code at the end
+                        state_match = re.search(r'([A-Z]{2})$', location_part)
                         if state_match:
                             state = state_match.group(1)
-                            # City is what's left after removing the state
-                            city = location_part.replace(state, "").strip()
-                            if city.endswith(","):
-                                city = city[:-1].strip()
-                
-                # Extract date using our simple date extractor
-                date_value = ultra_simple_date_extractor(date_text, year)
-                
-                # Determine categories based on the categories line
-                category_line = categories_line.lower()
-                primary_category = "Men's"  # Default
-                gender = "Men's"  # Default
-                
-                # List of possible categories in priority order
-                if "juniors" in category_line or "junior" in category_line:
-                    primary_category = "Junior's"
-                elif "seniors" in category_line or "senior" in category_line:
-                    primary_category = "Seniors"
-                elif "pro am" in category_line or "pro-am" in category_line:
-                    primary_category = "Pro-Am"
-                elif "team event" in category_line or "scramble" in category_line:
-                    primary_category = "Team"
+                            city = location_part[:-len(state)].strip()
+                        else:
+                            # No state code found, might be full state name
+                            city = location_part
+                            
+                            # Check for known state names
+                            state_names = {
+                                "Montana": "MT", "Idaho": "ID", "Wyoming": "WY", 
+                                "Washington": "WA", "Oregon": "OR", "North Dakota": "ND"
+                            }
+                            for name, code in state_names.items():
+                                if name in location_part:
+                                    state = code
+                                    city = location_part.replace(name, "").strip()
+                                    break
                     
-                # For tournaments with specific names that indicate category
-                name_lower = tournament_name.lower()
-                if "mid-amateur" in name_lower or "mid amateur" in name_lower:
-                    primary_category = "Mid-Amateur"
-                elif "amateur" in name_lower and "qualifier" not in name_lower:
-                    primary_category = "Amateur"
-                elif "four ball" in name_lower:
-                    primary_category = "Four-Ball"
-                elif "match play" in name_lower:
-                    primary_category = "Match Play"
-                elif "stroke play" in name_lower:
-                    primary_category = "Stroke Play"
-                
-                # Determine gender
-                if "womens" in category_line and not "mens" in category_line:
-                    gender = "Women's"
-                elif "mens" in category_line and "womens" in category_line:
-                    gender = "Mixed"
-                elif "ladies" in name_lower or "women" in name_lower:
-                    gender = "Women's"
-                
-                # Tournament specific overrides based on name
-                if "women's" in name_lower or "ladies" in name_lower:
-                    gender = "Women's"
-                if "senior" in name_lower:
-                    primary_category = "Seniors"
-                if "junior" in name_lower:
-                    primary_category = "Junior's"
-                
-                # Create tournament entry
-                if date_value:
-                    tournament = {
-                        'Date': date_value,
-                        'Name': tournament_name,
-                        'Course': course,
-                        'Category': primary_category,
-                        'Gender': gender,
-                        'City': city,
-                        'State': state if state else (default_state if default_state else None),
-                        'Zip': None
-                    }
-                    tournaments.append(tournament)
-                
-                # Move to next group of 3 lines
-                i += 3
+                    # Line 3: Categories
+                    category_line = line3.lower()
+                    
+                    # Determine primary category
+                    primary_category = "Men's"  # Default
+                    if "juniors" in category_line or "junior" in category_line:
+                        primary_category = "Junior's"
+                    elif "seniors" in category_line or "senior" in category_line:
+                        primary_category = "Seniors"
+                    elif "pro am" in category_line or "pro-am" in category_line:
+                        primary_category = "Pro-Am"
+                    elif "team event" in category_line or "scramble" in category_line:
+                        primary_category = "Team"
+                    
+                    # Tournament name might override category
+                    name_lower = tournament_name.lower()
+                    if "match play" in name_lower:
+                        primary_category = "Match Play"
+                    elif "amateur" in name_lower and "qualifier" not in name_lower:
+                        primary_category = "Amateur"
+                    elif "junior" in name_lower:
+                        primary_category = "Junior's"
+                    elif "senior" in name_lower:
+                        primary_category = "Seniors"
+                    
+                    # Determine gender
+                    gender = "Men's"  # Default
+                    if ("womens" in category_line or "women" in category_line) and not ("mens" in category_line or "men" in category_line):
+                        gender = "Women's"
+                    elif ("womens" in category_line or "women" in category_line) and ("mens" in category_line or "men" in category_line):
+                        gender = "Mixed"
+                    
+                    # Tournament name might indicate women's event
+                    if "women" in name_lower or "ladies" in name_lower:
+                        gender = "Women's"
+                    
+                    # Create tournament entry
+                    if date_value:
+                        # Create a dictionary with all tournament data
+                        tournament_data = {
+                            'Date': date_value,
+                            'Name': tournament_name.strip(),
+                            'Course': course,
+                            'Category': primary_category,
+                            'Gender': gender,
+                            'City': city,
+                            'State': state if state else (default_state if default_state else None),
+                            'Zip': None
+                        }
+                        
+                        # Add to debug data
+                        debug_data.append({
+                            'Index': i,
+                            'Line1': line1,
+                            'Line2': line2,
+                            'Line3': line3,
+                            'TournamentName': tournament_name,
+                            'DateText': date_text,
+                            'DateValue': date_value,
+                            'Course': course
+                        })
+                        
+                        # Add to tournaments list
+                        tournaments.append(tournament_data)
+                        
+                        # Debug output
+                        st.write(f"Added tournament #{len(tournaments)}: {tournament_name}")
+                        st.write(f"  Date: {date_value} | Course: {course}")
+                        
+                        # Skip to next tournament (3 lines)
+                        i += 3
+                    else:
+                        # Invalid date
+                        st.write(f"Skipping line {i} - invalid date: {date_text}")
+                        i += 1
+                else:
+                    # Not a tournament entry
+                    st.write(f"Skipping line {i} - not a tournament entry: {lines[i]}")
+                    i += 1
             else:
-                # Not a match for our pattern, skip to next line
+                # Not enough lines left
                 i += 1
         except Exception as e:
-            # Error processing this group, skip to next line
-            st.write(f"Error processing group at index {i}: {str(e)}")
+            st.write(f"Error at line {i}: {str(e)}")
             i += 1
+    
+    # Display debugging information
+    if debug_data:
+        st.write("### Raw Parsed Data (for debugging)")
+        for entry in debug_data[:5]:  # Show first 5 entries
+            st.write(f"Tournament from line {entry['Index']+1}:")
+            st.write(f"  Line 1 (Name): {entry['Line1']}")
+            st.write(f"  Line 2 (Date-Course): {entry['Line2']}")
+            st.write(f"  Line 3 (Categories): {entry['Line3']}")
+            st.write(f"  Extracted Name: {entry['TournamentName']}")
+            st.write(f"  Extracted Date: {entry['DateText']} → {entry['DateValue']}")
+            st.write(f"  Extracted Course: {entry['Course']}")
+            st.write("---")
     
     # Convert to DataFrame
     if tournaments:
-        st.write(f"Debug: Found {len(tournaments)} tournaments in Montana format")
+        st.write(f"Montana parser found {len(tournaments)} tournaments")
         
-        tournaments_df = pd.DataFrame(tournaments)
+        # Important: Create DataFrame with explicit column ordering
+        columns_order = ['Date', 'Name', 'Course', 'Category', 'Gender', 'City', 'State', 'Zip']
+        tournaments_df = pd.DataFrame(tournaments, columns=columns_order)
         
-        # Ensure all required columns exist
-        for col in REQUIRED_COLUMNS:
-            if col not in tournaments_df.columns:
-                tournaments_df[col] = None
-                
+        # Show the first few rows for verification
+        st.write("First few tournaments extracted:")
+        st.write(tournaments_df.head(3))
+        
         return tournaments_df
     else:
-        # Return empty DataFrame with all required columns
+        st.write("No tournaments found in Montana format")
         return pd.DataFrame(columns=REQUIRED_COLUMNS)
     
 def parse_name_date_course_format(text):
@@ -3440,33 +3496,140 @@ default_state = st.selectbox(
 output_filename = st.text_input("Output Filename (without extension):", "golf_tournaments")
 
 def ensure_column_order(df):
-    """Ensure DataFrame columns are in the correct order."""
-    # Get all columns that exist in the DataFrame
-    existing_columns = [col for col in REQUIRED_COLUMNS if col in df.columns]
+    """
+    Ensure DataFrame columns are in the correct order and all required columns exist.
+    This version has extra debugging to ensure the Name column is preserved.
+    """
+    # Debug: Show incoming DataFrame columns
+    st.write(f"Before column ordering - columns: {df.columns.tolist()}")
     
-    # Add any additional columns that might exist
-    other_columns = [col for col in df.columns if col not in REQUIRED_COLUMNS]
+    # Check if Name column exists
+    if 'Name' in df.columns:
+        # Check if Name column has values
+        empty_names = df['Name'].isnull() | (df['Name'] == '')
+        if empty_names.any():
+            st.warning(f"Found {empty_names.sum()} rows with empty Name values")
+            # Fix empty names with Course values if available
+            if 'Course' in df.columns:
+                df.loc[empty_names, 'Name'] = df.loc[empty_names, 'Course'] + " Tournament"
+        
+        # Show sample of Name column values
+        st.write("Sample of Name column values:")
+        for i, name in enumerate(df['Name'].head(3)):
+            st.write(f"  Row {i+1}: '{name}'")
+    else:
+        st.error("Name column is missing! Adding it from Course column.")
+        if 'Course' in df.columns:
+            df['Name'] = df['Course'] + " Tournament"
+        else:
+            df['Name'] = "Unknown Tournament"
     
-    # Reorder columns
-    return df[existing_columns + other_columns]
-
-# Process button
+    # Make sure all required columns exist
+    for col in REQUIRED_COLUMNS:
+        if col not in df.columns:
+            st.warning(f"Adding missing column: {col}")
+            df[col] = None
+    
+    # Reorder columns - put required columns first, then any additional columns
+    ordered_columns = REQUIRED_COLUMNS + [col for col in df.columns if col not in REQUIRED_COLUMNS]
+    
+    # Debug: Show final column order
+    st.write(f"After column ordering - columns: {ordered_columns}")
+    
+    # Return the properly ordered DataFrame
+    return df[ordered_columns]
+# Process button with enhanced debugging
 if st.button("Process Tournament Data"):
     if tournament_text:
         try:
-            # Special case for USGA format with "View" pattern
-            if "View" in tournament_text and "US " in tournament_text and re.search(r'(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun),\s+', tournament_text):
+            # Add a separator for clarity
+            st.markdown("---")
+            st.markdown("## Processing Tournament Data")
+            
+            # Check for Montana format directly (with detailed output)
+            montana_pattern_count = 0
+            lines = [line.strip() for line in tournament_text.split('\n') if line.strip()]
+            
+            # Verify Montana format - print first few lines for debugging
+            st.write("### Examining input format")
+            st.write("First few lines:")
+            for i in range(min(9, len(lines))):
+                st.write(f"Line {i+1}: {lines[i]}")
+            
+            # Look for date-course line with dash
+            for i in range(len(lines) - 2):
+                if (len(lines[i]) > 5 and  # Tournament name
+                    re.search(r'(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d{1,2},\s+\d{4}\s+-', lines[i+1]) and  # Date - Course
+                    any(category in lines[i+2].lower() for category in ["mens", "womens", "seniors", "juniors", "team", "pro", "am"])):  # Categories
+                    montana_pattern_count += 1
+                    
+                    # Show the first match for debugging
+                    if montana_pattern_count == 1:
+                        st.write("Found Montana format pattern:")
+                        st.write(f"Line {i+1} (Name): {lines[i]}")
+                        st.write(f"Line {i+2} (Date-Course): {lines[i+1]}")
+                        st.write(f"Line {i+3} (Categories): {lines[i+2]}")
+            
+            # Use manual format detection for improved reliability
+            if "View" in tournament_text and re.search(r'(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun),\s+', tournament_text):
+                st.write("Detected USGA View format")
                 df = parse_usga_view_format(tournament_text)
+            elif montana_pattern_count >= 1:
+                st.write(f"Detected Montana format with {montana_pattern_count} tournament entries")
+                df = parse_montana_format(tournament_text)
             else:
-                # Parse using regular format detection
+                # Use general format detection
                 df = parse_tournament_text(tournament_text)
             
-            # Ensure Gender is set for all rows
-            if 'Name' in df.columns:
-                df['Gender'] = df['Name'].apply(determine_gender)
+            # Check if DataFrame is empty
+            if df.empty:
+                st.error("No tournaments could be extracted from the text. Please check the format.")
+                # Create an empty DataFrame with all required columns
+                df = pd.DataFrame(columns=REQUIRED_COLUMNS)
+            else:
+                # Print the DataFrame details for debugging
+                st.write("### DataFrame Details Before Processing")
+                st.write(f"DataFrame shape: {df.shape}")
+                st.write(f"DataFrame columns: {df.columns.tolist()}")
+                
+                # Directly show the raw DataFrame and column types
+                st.write("### Raw DataFrame Sample")
+                st.write(df.head(3))
+                st.write("Column data types:")
+                st.write(df.dtypes)
+                
+                # Now look specifically at the Name column
+                if 'Name' in df.columns:
+                    st.write("### Name Column Values")
+                    name_values = df['Name'].tolist()
+                    for i, name in enumerate(name_values[:5]):  # Show first 5
+                        st.write(f"Row {i+1}: '{name}' (Type: {type(name).__name__})")
+                else:
+                    st.error("Name column is missing from the DataFrame!")
+                
+                # Explicitly ensure Name column exists and is in the right position
+                if 'Name' not in df.columns:
+                    st.warning("Adding missing Name column")
+                    df['Name'] = df['Course'] + " Tournament"  # Default name from course
+                
+                # Ensure all required columns exist
+                for col in REQUIRED_COLUMNS:
+                    if col not in df.columns:
+                        st.warning(f"Adding missing column: {col}")
+                        df[col] = None
+                
+                # Ensure columns are in the correct order
+                column_order = REQUIRED_COLUMNS + [col for col in df.columns if col not in REQUIRED_COLUMNS]
+                st.write(f"Reordering columns to: {column_order}")
+                df = df[column_order]
+                
+                # Show the reordered DataFrame
+                st.write("### DataFrame After Reordering")
+                st.write(df.head(3))
             
-            # Ensure columns are in the correct order
-            df = ensure_column_order(df)
+            # Add a separator for clarity
+            st.markdown("---")
+            st.markdown("## Final Results")
             
             # Display how many tournaments were found
             st.success(f"Successfully extracted {len(df)} tournaments!")
