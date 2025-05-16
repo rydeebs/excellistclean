@@ -1523,8 +1523,12 @@ def parse_montana_format_direct(text):
     Line 2: Date - Course, City, State  (with dash separator after date)
     Line 3: Categories
     """
+    # Debug info
+    st.write("Running DIRECT manual Montana parser")
+    
     # Split into lines and remove empty lines
     lines = [line.strip() for line in text.split('\n') if line.strip()]
+    st.write(f"Total lines: {len(lines)}")
     
     # Create result container
     tournaments = []
@@ -1538,6 +1542,7 @@ def parse_montana_format_direct(text):
     while i < len(lines):
         # Skip month headers
         if i < len(lines) and lines[i].lower() in month_headers and len(lines[i]) < 10:
+            st.write(f"Skipping month header: {lines[i]}")
             i += 1
             continue
         
@@ -1548,6 +1553,11 @@ def parse_montana_format_direct(text):
             date_course_line = lines[i+1]
             category_line = lines[i+2]
             
+            st.write(f"Processing tournament at lines {i+1}-{i+3}:")
+            st.write(f"  Name: '{tournament_name}'")
+            st.write(f"  Date/Course: '{date_course_line}'")
+            st.write(f"  Categories: '{category_line}'")
+            
             # KEY PART: Split the second line at the dash
             dash_parts = date_course_line.split(" - ", 1)  # Split at first dash only
             
@@ -1555,6 +1565,9 @@ def parse_montana_format_direct(text):
                 # Successfully split at the dash
                 date_part = dash_parts[0].strip()
                 location_part = dash_parts[1].strip()
+                
+                st.write(f"  Date part: '{date_part}'")
+                st.write(f"  Location part: '{location_part}'")
                 
                 # Process date
                 date_value = ultra_simple_date_extractor(date_part, year)
@@ -1626,12 +1639,15 @@ def parse_montana_format_direct(text):
                     }
                     
                     tournaments.append(tournament)
+                    st.write(f"  ✓ Added tournament: {tournament_name}")
                     
                     # Skip to next tournament (3 lines)
                     i += 3
                 else:
+                    st.write(f"  ✗ Invalid date format: {date_part}")
                     i += 1
             else:
+                st.write(f"  ✗ No dash separator found in the date/course line")
                 i += 1
         else:
             # Not enough lines left
@@ -1639,15 +1655,21 @@ def parse_montana_format_direct(text):
     
     # Check if we found any tournaments
     if tournaments:
+        st.write(f"Successfully found {len(tournaments)} tournaments")
+        
         # Create the DataFrame with a specific column order
         columns = ['Date', 'Name', 'Course', 'Category', 'Gender', 'City', 'State', 'Zip']
         tournaments_df = pd.DataFrame(tournaments, columns=columns)
         
+        # Verify the Name column values
+        st.write("### Name Column Verification")
+        for i, name in enumerate(tournaments_df['Name'].head(5)):
+            st.write(f"Row {i+1}: '{name}'")
+        
         return tournaments_df
     else:
-        # Return empty DataFrame with all required columns
+        st.write("No tournaments found")
         return pd.DataFrame(columns=REQUIRED_COLUMNS) 
- 
     
 def parse_name_date_course_format(text):
     """
@@ -2108,15 +2130,14 @@ def parse_events_with_sections_format(text):
 
 def detect_format(text):
     """Detect which format the text is in."""
-    # Split the text into lines and check for patterns
+     # Split the text into lines and check for patterns
     lines = [line.strip() for line in text.split('\n')]
 
     # Check for Montana format with 3-line pattern: name, date-course, categories
     montana_pattern_count = 0
     for i in range(len(lines) - 2):
         if (len(lines[i]) > 5 and  # Tournament name
-            " - " in lines[i+1] and  # Date - Course with dash separator
-            re.search(r'(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d{1,2},\s+\d{4}\s+-', lines[i+1]) and  # Date format before dash
+            re.search(r'(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d{1,2},\s+\d{4}\s+-', lines[i+1]) and  # Date - Course
             any(category in lines[i+2].lower() for category in ["mens", "womens", "seniors", "juniors", "team", "pro", "am"])):  # Categories
             montana_pattern_count += 1
     
@@ -3211,7 +3232,7 @@ def parse_tournament_text(text):
     
     # New formats
     if format_type == "MONTANA_FORMAT":
-        return parse_montana_format_direct(text)
+        return parse_montana_format(text)
     elif format_type == "MISSOURI_FORMAT":
         return parse_missouri_tournament_format(text)
     elif format_type == "USGA_VIEW_FORMAT":
