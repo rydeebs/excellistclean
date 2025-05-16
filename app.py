@@ -4204,30 +4204,31 @@ def create_tournament_dataframe(tournaments, format_name=""):
         return pd.DataFrame(columns=REQUIRED_COLUMNS)
 
 def detect_tournament_format(lines):
-    """Consolidated format detection logic"""
-    # Check for Montana format
+    """
+    Detect specific tournament formats within the text.
+    Returns two boolean values: montana_format and course_repeat_format.
+    """
+    # Initialize format flags
     montana_format = False
-    for i in range(len(lines) - 2):
-        if (len(lines[i]) > 5 and  # Tournament name
-            " - " in lines[i+1] and  # Date - Course with dash separator
-            any(month in lines[i+1] for month in ["Jan", "Feb", "Mar", "Apr", "May", "Jun", 
-                                                "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]) and
-            any(category in lines[i+2].lower() for category in ["mens", "womens", "seniors", "juniors", "team", "pro", "am"])):
-            montana_format = True
-            break
-    
-    # Check for course-repeating format
     course_repeat_format = False
-    i = 0
-    while i < len(lines):
-        if i + 4 < len(lines) and all(lines[i+j] for j in range(5)):
-            if lines[i] == lines[i+2]:
-                if re.search(r'.*?,\s+[A-Z]{2}', lines[i+3]):
-                    if any(month in lines[i+4] for month in ["Jan", "Feb", "Mar", "Apr", "May", "Jun", 
-                                                           "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]):
-                        course_repeat_format = True
-                        break
-        i += 1
+    
+    # Check for Montana tournament format indicators
+    montana_indicators = 0
+    for line in lines:
+        if "Montana" in line or "MT" in line:
+            montana_indicators += 1
+    
+    if montana_indicators >= 2:
+        montana_format = True
+    
+    # Check for course repetition format (course name appears on first and third lines)
+    course_repetitions = 0
+    for i in range(len(lines) - 2):
+        if lines[i] == lines[i+2]:  # Exact match between first and third line
+            course_repetitions += 1
+    
+    if course_repetitions >= 3:
+        course_repeat_format = True
     
     return montana_format, course_repeat_format
 
