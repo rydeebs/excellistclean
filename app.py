@@ -4089,9 +4089,9 @@ if st.button("Process Tournament Data"):
             
             # Replace line 4091
             format_type = detect_format(text)
-            montana_format = False  # Set default value
-            course_repeat_format = format_type == "COURSE_FIRST_FORMAT"  # Check if it's the course-first format
-                        
+            montana_format = False
+            course_repeat_format = False
+            
             # Use appropriate parser based on the format
             if montana_format:
                 st.write("### Montana format detected - using direct manual parser")
