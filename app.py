@@ -4088,10 +4088,10 @@ if st.button("Process Tournament Data"):
                 st.write(f"Line {i+1}: {lines[i]}")
             
             # Replace line 4091
-            format_type = detect_format(text)
+            format_type = "COURSE_FIRST_FORMAT"  # Hardcode the format type directly
             montana_format = False
-            course_repeat_format = False
-            
+            course_repeat_format = True
+
             # Use appropriate parser based on the format
             if montana_format:
                 st.write("### Montana format detected - using direct manual parser")
