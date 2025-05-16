@@ -4205,6 +4205,23 @@ def create_tournament_dataframe(tournaments, format_name=""):
         # Return empty DataFrame with all required columns
         return pd.DataFrame(columns=REQUIRED_COLUMNS)
 
+def detect_format(text):
+    """Detect which format the text is in."""
+    # Split the text into lines and check for patterns
+    lines = [line.strip() for line in text.split('\n')]
+    
+    # Check for course-first format (course, tournament, course again, city/state, date)
+    course_repeat_count = 0
+    for i in range(len(lines) - 2):
+        if lines[i] == lines[i+2]:  # Course name repeats
+            course_repeat_count += 1
+    
+    if course_repeat_count >= 3:
+        return "COURSE_FIRST_FORMAT"
+    
+    # Default format
+    return "SIMPLE"
+
 def detect_tournament_format(lines):
     """
     Detect specific tournament formats within the text.
@@ -4223,7 +4240,7 @@ def detect_tournament_format(lines):
     if montana_indicators >= 2:
         montana_format = True
     
-    # Check for course repetition format (course name appears on first and third lines)
+    # Check for course repetition format
     course_repetitions = 0
     for i in range(len(lines) - 2):
         if lines[i] == lines[i+2]:  # Exact match between first and third line
