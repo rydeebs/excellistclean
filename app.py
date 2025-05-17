@@ -2984,15 +2984,42 @@ def ensure_column_order(df):
 if st.button("Process Tournament Data"):
     if tournament_text:
         try:
-            # Check for NNGA format by looking for "View" lines (very specific format)
+            # BYPASS the format detection system completely for your special formats
+            
+            # Check for NNGA format with "View" lines
             if "View" in tournament_text:
                 st.write("Detected NNGA format - using specialized parser")
-                df = parse_nnga_data(tournament_text, year, default_state)  # Changed from parse_nnga_format to parse_nnga_data
+                df = parse_nnga_format(tournament_text, year, default_state)
+            
+            # Check for course-tournament-course pattern (repeated course names)
+            elif len(tournament_text.split('\n')) > 10:  # Ensure enough lines for pattern
+                lines = [line.strip() for line in tournament_text.split('\n') if line.strip()]
+                
+                # Check for the pattern where course name repeats
+                pattern_count = 0
+                for i in range(len(lines) - 2):
+                    if i+2 < len(lines) and (lines[i] == lines[i+2] or 
+                                             (len(lines[i]) > 5 and len(lines[i+2]) > 5 and
+                                              lines[i] in lines[i+2] or lines[i+2] in lines[i])):
+                        pattern_count += 1
+                        if pattern_count >= 2:  # At least 2 instances of the pattern
+                            break
+                
+                if pattern_count >= 2:
+                    st.write("Detected Course-Tournament format - using specialized parser")
+                    df = parse_course_tournament_format(tournament_text, year, default_state)
+                    
+                    # IMPORTANT: Do NOT call any other parsers or format detection
+                else:
+                    # Fall back to standard format detection
+                    st.write("Using standard format detection")
+                    df = parse_tournament_text(tournament_text)
             else:
                 # For other formats, use the original format detection and parsing
                 st.write("Using standard format detection")
                 df = parse_tournament_text(tournament_text)
             
+            # Rest of processing remains the same
             # Check if DataFrame is empty
             if df.empty:
                 st.error("No tournaments could be extracted from the text. Please check the format.")
