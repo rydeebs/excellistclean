@@ -2782,6 +2782,135 @@ def parse_course_first_format(text):
     else:
         # Return empty DataFrame with all required columns
         return pd.DataFrame(columns=REQUIRED_COLUMNS)
+    
+def parse_nnga_data(text_input, default_year="2025", default_state=None):
+    """
+    Standalone parser for NNGA tournament data.
+    """
+    # Process input text
+    lines = text_input.replace('\r\n', '\n').replace('\r', '\n').split('\n')
+    lines = [line.strip() for line in lines if line.strip()]
+    
+    # Define month mapping
+    month_map = {
+        'Jan': '01', 'Feb': '02', 'Mar': '03', 'Apr': '04', 
+        'May': '05', 'Jun': '06', 'Jul': '07', 'Aug': '08',
+        'Sep': '09', 'Oct': '10', 'Nov': '11', 'Dec': '12'
+    }
+    
+    # Initialize result list
+    tournaments = []
+    
+    # Find all "View" lines - they're our anchor points
+    view_indices = [i for i, line in enumerate(lines) if line == "View"]
+    
+    # Process each tournament based on View line positions
+    for view_idx in view_indices:
+        try:
+            # Tournament name is the line before "View"
+            if view_idx > 0:
+                name = lines[view_idx - 1]
+                
+                # Date line is right after "View"
+                date_line = lines[view_idx + 1]
+                
+                # Course line determination
+                course_idx = view_idx + 2
+                # If there's a "Next Round" line, skip it
+                if course_idx < len(lines) and lines[course_idx].startswith("Next Round:"):
+                    course_idx += 1
+                
+                # Get course name if index is valid
+                if course_idx < len(lines):
+                    course = lines[course_idx]
+                    
+                    # Extract date
+                    date_value = None
+                    
+                    # Check if it's a date range
+                    if "-" in date_line:
+                        # Get first date from range
+                        first_part = date_line.split("-")[0].strip()
+                        date_match = re.search(r'(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun),\s+(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+(\d{1,2})', first_part)
+                        if date_match:
+                            month, day = date_match.groups()
+                            date_value = f"{default_year}-{month_map[month]}-{day.zfill(2)}"
+                    else:
+                        # Single date
+                        date_match = re.search(r'(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun),\s+(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+(\d{1,2})', date_line)
+                        if date_match:
+                            month, day = date_match.groups()
+                            date_value = f"{default_year}-{month_map[month]}-{day.zfill(2)}"
+                    
+                    # Only add if we have all required data
+                    if date_value:
+                        # Determine category and gender
+                        name_lower = name.lower()
+                        category = "Men's"  # Default
+                        gender = "Men's"    # Default
+                        
+                        # Category detection
+                        if "mid-amateur" in name_lower:
+                            category = "Mid-Amateur"
+                        elif "match play" in name_lower:
+                            category = "Match Play"
+                        elif "senior" in name_lower and "net" not in name_lower:
+                            category = "Seniors"
+                        elif "junior" in name_lower:
+                            category = "Junior's"
+                        elif "amateur" in name_lower and "mid-amateur" not in name_lower:
+                            category = "Amateur"
+                        elif "team" in name_lower or "2-man" in name_lower:
+                            category = "Four-Ball"
+                        elif "net" in name_lower:
+                            category = "Net"
+                        
+                        # Gender detection
+                        if "women's" in name_lower or "ladies" in name_lower:
+                            gender = "Women's"
+                        
+                        # Create tournament record
+                        tournament = {
+                            "Date": date_value,
+                            "Name": name,
+                            "Course": course,
+                            "Category": category,
+                            "Gender": gender,
+                            "City": None,
+                            "State": default_state,
+                            "Zip": None
+                        }
+                        
+                        tournaments.append(tournament)
+        except Exception as e:
+            st.error(f"Error processing tournament at View index {view_idx}: {str(e)}")
+    
+    # Convert to DataFrame
+    if tournaments:
+        df = pd.DataFrame(tournaments)
+        return df
+    else:
+        # Return empty DataFrame with required columns
+        return pd.DataFrame(columns=["Date", "Name", "Course", "Category", "Gender", "City", "State", "Zip"])
+
+# Define the Streamlit app
+st.title("NNGA Tournament Parser")
+st.write("Paste NNGA tournament data below to parse it into a structured format.")
+
+# Text area for input
+tournament_text = st.text_area(
+    "Paste your tournament text here:", 
+    height=400,
+    help="Paste the raw text containing tournament information."
+)
+
+# Year and state inputs
+year = st.text_input("Tournament Year (if not specified in text):", "2025")
+default_state = st.selectbox(
+    "Default State for Tournaments:",
+    ["", "NV", "AZ", "CA", "ID", "OR", "WA", "UT", "CO", "NM", "TX"],
+    index=1
+)
 
 def parse_list_format(text, year="2025"):
     """
@@ -3537,44 +3666,14 @@ def ensure_column_order(df):
 if st.button("Process Tournament Data"):
     if tournament_text:
         try:
-            # Check if this is NNGA format (contains "View" lines)
-            if "View" in tournament_text and re.search(r'(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun),\s+', tournament_text):
-                df = parse_robust_nnga_tournaments(tournament_text, year, default_state)
-                
-                # Debug info to verify it's working
-                st.write(f"Using NNGA format parser. Found {len(df)} tournaments.")
+            # Check for NNGA format by looking for "View" lines (very specific format)
+            if "View" in tournament_text:
+                st.write("Detected NNGA format - using specialized parser")
+                df = parse_nnga_format(tournament_text, year, default_state)
             else:
-                # Use the original parser for other formats
+                # For other formats, use the original format detection and parsing
+                st.write("Using standard format detection")
                 df = parse_tournament_text(tournament_text)
-            
-            # Check for Montana format directly (name, date-course, categories pattern)
-            montana_pattern_count = 0
-            lines = [line.strip() for line in tournament_text.split('\n') if line.strip()]
-            
-            for i in range(len(lines) - 2):
-                if (len(lines[i]) > 5 and  # Tournament name
-                    re.search(r'(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d{1,2},\s+\d{4}\s+-', lines[i+1]) and  # Date - Course
-                    any(category in lines[i+2].lower() for category in ["mens", "womens", "seniors", "juniors", "team", "pro", "am"])):  # Categories
-                    montana_pattern_count += 1
-            
-            if montana_pattern_count >= 1:
-                st.write(f"Detected Montana format with {montana_pattern_count} tournament entries")
-                df = parse_montana_format(tournament_text)
-            
-            # Check for USGA view format (Name, View, Date, Course pattern)
-            elif "View" in tournament_text and re.search(r'(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun),\s+', tournament_text):
-                st.write("Detected USGA View format")
-                df = parse_usga_view_format(tournament_text)
-            
-            # Check for Missouri format (day number, month, tournament name pattern)
-            elif any(line.isdigit() and 1 <= int(line) <= 31 for line in lines[:10]) and any(month in " ".join(lines[:10]).lower() for month in ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"]):
-                st.write("Detected Missouri format")
-                df = parse_missouri_tournament_format(tournament_text)
-            
-            # If no specific format detected, use general format detection
-            else:
-                # Parse using regular format detection
-                df = detect_and_parse_nnga_format(tournament_text, year)
             
             # Check if DataFrame is empty
             if df.empty:
