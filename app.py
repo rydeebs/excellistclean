@@ -1911,6 +1911,195 @@ def parse_name_date_course_format(text):
         # Return empty DataFrame with all required columns
         return pd.DataFrame(columns=REQUIRED_COLUMNS)
     
+def parse_monthly_entries_format(text, default_year="2025", default_state=None):
+    """
+    Parser for format with month headers and entry details:
+    
+    [Month Year] (optional header)
+    Mon DD, YYYY
+    Tournament Name - Course
+    Entry Status
+    Course Name — City
+    
+    Arguments:
+    text -- The raw tournament text
+    default_year -- Default year to use if not specified in text
+    default_state -- Default state to use if not specified in text
+    
+    Returns:
+    DataFrame with parsed tournament data
+    """
+    # Process text into lines
+    lines = text.replace('\r\n', '\n').replace('\r', '\n').split('\n')
+    lines = [line.strip() for line in lines if line.strip()]
+    
+    # Month mapping for date conversion
+    month_map = {
+        'Jan': '01', 'January': '01', 
+        'Feb': '02', 'February': '02', 
+        'Mar': '03', 'March': '03', 
+        'Apr': '04', 'April': '04', 
+        'May': '05', 
+        'Jun': '06', 'June': '06', 
+        'Jul': '07', 'July': '07', 
+        'Aug': '08', 'August': '08', 
+        'Sep': '09', 'Sept': '09', 'September': '09', 
+        'Oct': '10', 'October': '10', 
+        'Nov': '11', 'November': '11', 
+        'Dec': '12', 'December': '12'
+    }
+    
+    # List to store parsed tournaments
+    tournaments = []
+    st.write(f"Monthly-Entries parser: processing {len(lines)} lines")
+    
+    # Process the data
+    i = 0
+    current_month = None
+    
+    while i < len(lines):
+        # Check if this is a month header line (e.g., "May 2025" or "June 2025")
+        month_year_match = re.match(r'^([A-Za-z]+)\s+(\d{4})$', lines[i])
+        if month_year_match:
+            current_month = month_year_match.group(1)
+            i += 1
+            continue
+        
+        # Check if this is a date line (e.g., "May 19, 2025" or "Jun 3–5, 2025")
+        date_match = re.match(r'^([A-Za-z]+)\s+(\d{1,2})(?:–\d{1,2})?,\s+(\d{4})$', lines[i])
+        date_match2 = re.match(r'^([A-Za-z]+)\s+(\d{1,2})–(\d{1,2}),\s+(\d{4})$', lines[i])
+        date_match3 = re.match(r'^([A-Za-z]+)\s+(\d{1,2}),\s+(\d{4})$', lines[i])
+        
+        if date_match or date_match2 or date_match3:
+            # Extract date components
+            if date_match:
+                month_name, day, year = date_match.groups()
+            elif date_match2:
+                month_name, day, _, year = date_match2.groups()
+            else:
+                month_name, day, year = date_match3.groups()
+            
+            month = month_map.get(month_name[:3], '01')
+            date_value = f"{year}-{month}-{day.zfill(2)}"
+            
+            # Tournament name should be on the next line
+            if i + 1 < len(lines):
+                tournament_name = lines[i + 1]
+                
+                # Entry status on next line
+                entry_status = None
+                if i + 2 < len(lines):
+                    if lines[i + 2].startswith("Entry Deadline:") or lines[i + 2].startswith("Entries "):
+                        entry_status = lines[i + 2]
+                    
+                    # Course and location info
+                    course_location_idx = i + 3 if entry_status else i + 2
+                    course_location = None
+                    
+                    if course_location_idx < len(lines):
+                        # Check if this line is a date (which would mean we're at the next tournament)
+                        next_date_check = re.match(r'^([A-Za-z]+)\s+\d{1,2}', lines[course_location_idx])
+                        if not next_date_check:
+                            course_location = lines[course_location_idx]
+                    
+                    # Parse course and location
+                    course_name = None
+                    city = None
+                    
+                    if course_location:
+                        # Format is typically "Course Name — City"
+                        if "—" in course_location:
+                            parts = course_location.split("—")
+                            course_name = parts[0].strip()
+                            city = parts[1].strip() if len(parts) > 1 else None
+                        else:
+                            course_name = course_location
+                    
+                    # If tournament name includes course, extract it
+                    if " - " in tournament_name:
+                        # Format "Tournament Name - Course Name"
+                        name_parts = tournament_name.split(" - ")
+                        tournament_name_only = name_parts[0].strip()
+                        if not course_name:
+                            course_name = name_parts[1].strip()
+                    else:
+                        tournament_name_only = tournament_name
+                    
+                    # Determine category and gender
+                    name_lower = tournament_name_only.lower()
+                    category = "Men's"  # Default
+                    gender = "Men's"    # Default
+                    
+                    # Category detection
+                    if "mid-amateur" in name_lower:
+                        category = "Mid-Amateur"
+                    elif "match play" in name_lower:
+                        category = "Match Play"
+                    elif "senior" in name_lower and "super" not in name_lower and "women" not in name_lower:
+                        category = "Seniors"
+                    elif "super-senior" in name_lower:
+                        category = "Super Senior"
+                    elif "junior" in name_lower:
+                        category = "Junior's"
+                    elif "amateur" in name_lower and "mid-amateur" not in name_lower:
+                        category = "Amateur"
+                    elif "open" in name_lower and "championship" in name_lower:
+                        category = "Open"
+                    elif "father" in name_lower and "son" in name_lower:
+                        category = "Father & Son"
+                        gender = "Men's"
+                    elif "parent" in name_lower and "child" in name_lower:
+                        category = "Parent & Child"
+                        gender = "Mixed"
+                    elif "mixed" in name_lower:
+                        category = "Mixed/Couples"
+                        gender = "Mixed"
+                    elif "women" in name_lower or "ladies" in name_lower:
+                        category = "Women's"
+                        gender = "Women's"
+                    elif "public links" in name_lower:
+                        category = "Public Links"
+                    elif "member golf day" in name_lower:
+                        category = "Member Day"
+                    
+                    # Create tournament record
+                    tournament = {
+                        "Date": date_value,
+                        "Name": tournament_name_only,
+                        "Course": course_name,
+                        "Category": category,
+                        "Gender": gender,
+                        "City": city,
+                        "State": default_state,
+                        "Zip": None
+                    }
+                    
+                    tournaments.append(tournament)
+                    st.write(f"✓ Added tournament: {tournament_name_only} at {course_name} on {date_value}")
+                    
+                    # Advance to next tournament
+                    i = course_location_idx + 1 if course_location else i + 2
+                else:
+                    i += 1
+            else:
+                i += 1
+        else:
+            i += 1
+    
+    # Convert to DataFrame
+    if tournaments:
+        st.write(f"Monthly-Entries parser: found {len(tournaments)} tournaments")
+        df = pd.DataFrame(tournaments)
+        # Ensure all required columns exist
+        for col in ["Date", "Name", "Course", "Category", "Gender", "City", "State", "Zip"]:
+            if col not in df.columns:
+                df[col] = None
+        return df
+    else:
+        # Return empty DataFrame with required columns
+        st.write("Monthly-Entries parser: NO tournaments found")
+        return pd.DataFrame(columns=["Date", "Name", "Course", "Category", "Gender", "City", "State", "Zip"])
+    
 def parse_cdga_format(text):
     """
     Parse format with tournament name, date, day+course location, and status information.
@@ -3167,6 +3356,11 @@ if st.button("Process Tournament Data"):
             if "View" in tournament_text:
                 st.write("Detected NNGA format - using specialized parser")
                 df = parse_nnga_format(tournament_text, year, default_state)
+            
+            # Check for monthly entries format with month headers
+            elif re.search(r'Entry Deadline:|Entries Closed|Entries Open:', tournament_text):
+                st.write("Detected Monthly-Entries format - using specialized parser")
+                df = parse_monthly_entries_format(tournament_text, year, default_state)
             
             # Check for day-month-tournament pattern
             elif any(line.isdigit() and 1 <= int(line) <= 31 for line in tournament_text.split('\n')):
