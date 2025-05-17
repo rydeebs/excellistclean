@@ -754,6 +754,8 @@ def parse_amateur_golf_format_improved(text, default_year="2025", default_state=
     City, State
     Date Range
     
+    Handles unlimited number of tournaments with no row limitations.
+    
     Arguments:
     text -- The raw tournament text
     default_year -- Default year to use if not specified in text
@@ -944,7 +946,9 @@ def parse_amateur_golf_format_improved(text, default_year="2025", default_state=
                         }
                         
                         tournaments.append(tournament)
-                        st.write(f"✓ Added tournament (5-line): {tournament_name}")
+                        # Only print for the first few tournaments to avoid flooding the output
+                        if len(tournaments) <= 10 or len(tournaments) % 10 == 0:
+                            st.write(f"✓ Added tournament #{len(tournaments)} (5-line): {tournament_name}")
             
             # Move to next block of 5 lines
             i += 5
@@ -1038,22 +1042,28 @@ def parse_amateur_golf_format_improved(text, default_year="2025", default_state=
                     }
                     
                     tournaments.append(tournament)
-                    st.write(f"✓ Added tournament (4-line): {tournament_name}")
+                    # Only print for the first few tournaments to avoid flooding the output
+                    if len(tournaments) <= 10 or len(tournaments) % 10 == 0:
+                        st.write(f"✓ Added tournament #{len(tournaments)} (4-line): {tournament_name}")
             
             # Move to next block of 4 lines
             i += 4
     
-    # Convert to DataFrame
+    # Convert to DataFrame - with specific column ordering
     if tournaments:
         st.write(f"Amateur Golf parser: Found {len(tournaments)} tournaments")
         df = pd.DataFrame(tournaments)
-        # Add any missing columns
-        for col in ["Date", "Name", "Course", "Category", "Gender", "City", "State", "Zip"]:
+        
+        # Ensure specific column order
+        columns = ["Date", "Name", "Course", "Category", "Gender", "City", "State", "Zip"]
+        for col in columns:
             if col not in df.columns:
                 df[col] = None
-        return df
+        
+        # Return DataFrame with defined column order
+        return df[columns]
     else:
-        # Return empty DataFrame
+        # Return empty DataFrame with required columns
         st.write("Amateur Golf parser: No tournaments found")
         return pd.DataFrame(columns=["Date", "Name", "Course", "Category", "Gender", "City", "State", "Zip"])
     
@@ -3684,7 +3694,7 @@ def ensure_column_order(df):
 if st.button("Process Tournament Data"):
     if tournament_text:
         try:
-            # Try the improved unified Amateur Golf format parser first
+            # Try the improved unlimited Amateur Golf format parser first
             df = parse_amateur_golf_format_improved(tournament_text, year, default_state)
             
             if not df.empty:
@@ -3746,7 +3756,7 @@ if st.button("Process Tournament Data"):
             else:
                 # Show detailed information about the raw extracted data for debugging
                 st.write("### Raw Extracted Data (First few rows)")
-                display_df = df.head(3).copy()
+                display_df = df.head(5).copy()
                 # Convert any complex objects to strings for display
                 for col in display_df.columns:
                     display_df[col] = display_df[col].apply(lambda x: str(x) if x is not None else None)
@@ -3774,13 +3784,28 @@ if st.button("Process Tournament Data"):
             # Display how many tournaments were found
             st.success(f"Successfully extracted {len(df)} tournaments!")
             
-            # Display the DataFrame after all processing
-            st.write("### Processed Tournament Data")
-            st.write(df)
+            # Display the DataFrame with pagination controls for large datasets
+            if len(df) > 20:
+                st.write("### Processed Tournament Data (Paginated)")
+                page_size = st.selectbox("Rows per page:", [10, 20, 50, 100], index=1)
+                total_pages = (len(df) + page_size - 1) // page_size
+                page = st.number_input("Page:", min_value=1, max_value=total_pages, value=1)
+                
+                start_idx = (page - 1) * page_size
+                end_idx = min(start_idx + page_size, len(df))
+                
+                st.write(f"Showing rows {start_idx+1}-{end_idx} of {len(df)}")
+                st.write(df.iloc[start_idx:end_idx])
+            else:
+                # For smaller datasets, just show everything
+                st.write("### Processed Tournament Data")
+                st.write(df)
             
             # Also show the raw data in table format to ensure all rows are visible
-            st.write("### Tournament Table (All Rows)")
-            st.table(df.head(100))  # Show up to 100 rows in table format
+            with st.expander("Show full data table view"):
+                max_rows = min(300, len(df))  # Show up to 300 rows max
+                st.write(f"Showing first {max_rows} rows of {len(df)} total tournaments")
+                st.table(df.head(max_rows))
             
             # Create download buttons for the data
             csv = df.to_csv(index=False)
