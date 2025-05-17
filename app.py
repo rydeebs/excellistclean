@@ -723,98 +723,105 @@ def parse_usga_view_format(text):
         # Return empty DataFrame with all required columns
         return pd.DataFrame(columns=REQUIRED_COLUMNS)
 
-def parse_nnga_tournaments(text, year="2025", default_state=None):
+def parse_robust_nnga_tournaments(text, year="2025", default_state=None):
     """
-    Simple, dedicated parser for NNGA tournament format.
-    This parser expects data in exactly 4-line chunks:
-    
-    Line 1: Tournament name
-    Line 2: "View"
-    Line 3: Date (with day of week prefix)
-    Line 4: Course name
+    Robust parser for NNGA tournament format that handles variable line spacing.
+    This parser anchors on "View" lines and handles extra information like "OPEN", "closes on", etc.
     """
-    # Convert line endings and split into lines
+    # Process text into lines
     text = text.replace('\r\n', '\n').replace('\r', '\n')
     lines = [line.strip() for line in text.split('\n') if line.strip()]
     
     tournaments = []
     
-    # Month to number mapping
+    # Month dictionary for date conversion
     month_dict = {
         'Jan': '01', 'Feb': '02', 'Mar': '03', 'Apr': '04', 'May': '05', 'Jun': '06',
         'Jul': '07', 'Aug': '08', 'Sep': '09', 'Oct': '10', 'Nov': '11', 'Dec': '12'
     }
     
-    # Process in chunks of 4 lines
-    for i in range(0, len(lines), 4):
-        # Make sure we have enough lines for a complete entry
-        if i + 3 < len(lines):
-            name = lines[i]
-            view_line = lines[i + 1]
-            date_line = lines[i + 2]
-            course = lines[i + 3]
-            
-            # Verify this follows the pattern (name, View, date, course)
-            if view_line == "View":
-                # Extract date from the date line
-                date_value = None
+    # Find all tournament entries by looking for "View" lines
+    for i in range(len(lines) - 1):
+        # Check if this is a "View" line
+        if lines[i] == "View":
+            # Tournament name is in the line before "View"
+            if i > 0:
+                name = lines[i - 1]
                 
-                # Handle date ranges by taking first date
-                if "-" in date_line:
-                    first_date_part = date_line.split("-")[0].strip()
-                    # Extract month and day
-                    date_match = re.search(r'(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun),\s+(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+(\d{1,2})', first_date_part)
-                    if date_match:
-                        month, day = date_match.groups()
-                        date_value = f"{year}-{month_dict[month]}-{day.zfill(2)}"
-                else:
-                    # Handle single date
-                    date_match = re.search(r'(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun),\s+(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+(\d{1,2})', date_line)
-                    if date_match:
-                        month, day = date_match.groups()
-                        date_value = f"{year}-{month_dict[month]}-{day.zfill(2)}"
-                
-                if date_value and course:
-                    # Determine category and gender
-                    category = "Men's"  # Default
-                    gender = "Men's"    # Default
+                # Date line is right after "View"
+                if i + 1 < len(lines):
+                    date_line = lines[i + 1]
                     
-                    # Simple category detection
-                    name_lower = name.lower()
-                    if "mid-amateur" in name_lower:
-                        category = "Mid-Amateur"
-                    elif "match play" in name_lower:
-                        category = "Match Play"
-                    elif "senior" in name_lower and "net" not in name_lower:
-                        category = "Seniors"
-                    elif "junior" in name_lower:
-                        category = "Junior's"
-                    elif "amateur" in name_lower and "mid-amateur" not in name_lower:
-                        category = "Amateur"
-                    elif "team" in name_lower or "2-man" in name_lower:
-                        category = "Four-Ball"
-                    elif "net" in name_lower:
-                        category = "Net"
-                    elif "champions" in name_lower:
-                        category = "Champions"
+                    # Extract course name (could be after "Next Round:" line)
+                    course_line = None
+                    if i + 2 < len(lines):
+                        if lines[i + 2].startswith("Next Round:"):
+                            # Skip the "Next Round:" line
+                            if i + 3 < len(lines):
+                                course_line = lines[i + 3]
+                        else:
+                            course_line = lines[i + 2]
                     
-                    # Gender detection
-                    if "women's" in name_lower or "ladies" in name_lower:
-                        gender = "Women's"
+                    # Extract date value
+                    date_value = None
                     
-                    # Add tournament to the list
-                    tournament = {
-                        'Date': date_value,
-                        'Name': name,
-                        'Course': course,
-                        'Category': category,
-                        'Gender': gender,
-                        'City': None,
-                        'State': default_state,
-                        'Zip': None
-                    }
+                    # Handle date ranges by taking first date
+                    if "-" in date_line:
+                        first_date_part = date_line.split("-")[0].strip()
+                        # Extract month and day
+                        date_match = re.search(r'(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun),\s+(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+(\d{1,2})', first_date_part)
+                        if date_match:
+                            month, day = date_match.groups()
+                            date_value = f"{year}-{month_dict[month]}-{day.zfill(2)}"
+                    else:
+                        # Handle single date
+                        date_match = re.search(r'(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun),\s+(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+(\d{1,2})', date_line)
+                        if date_match:
+                            month, day = date_match.groups()
+                            date_value = f"{year}-{month_dict[month]}-{day.zfill(2)}"
                     
-                    tournaments.append(tournament)
+                    # If we have all necessary pieces, create a tournament entry
+                    if date_value and course_line:
+                        # Determine category and gender
+                        category = "Men's"  # Default
+                        gender = "Men's"    # Default
+                        
+                        # Category detection
+                        name_lower = name.lower()
+                        if "mid-amateur" in name_lower:
+                            category = "Mid-Amateur"
+                        elif "match play" in name_lower:
+                            category = "Match Play"
+                        elif "senior" in name_lower and "net" not in name_lower:
+                            category = "Seniors"
+                        elif "junior" in name_lower:
+                            category = "Junior's"
+                        elif "amateur" in name_lower and "mid-amateur" not in name_lower:
+                            category = "Amateur"
+                        elif "team" in name_lower or "2-man" in name_lower:
+                            category = "Four-Ball"
+                        elif "net" in name_lower:
+                            category = "Net"
+                        elif "champions" in name_lower:
+                            category = "Champions"
+                        
+                        # Gender detection
+                        if "women's" in name_lower or "ladies" in name_lower:
+                            gender = "Women's"
+                        
+                        # Create and add tournament entry
+                        tournament = {
+                            'Date': date_value,
+                            'Name': name,
+                            'Course': course_line,
+                            'Category': category,
+                            'Gender': gender,
+                            'City': None,
+                            'State': default_state,
+                            'Zip': None
+                        }
+                        
+                        tournaments.append(tournament)
     
     # Convert to DataFrame
     if tournaments:
@@ -3530,11 +3537,12 @@ def ensure_column_order(df):
 if st.button("Process Tournament Data"):
     if tournament_text:
         try:
-            # REPLACE THIS SECTION with this code:
-            
             # Check if this is NNGA format (contains "View" lines)
             if "View" in tournament_text and re.search(r'(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun),\s+', tournament_text):
-                df = parse_nnga_tournaments(tournament_text, year, default_state)
+                df = parse_robust_nnga_tournaments(tournament_text, year, default_state)
+                
+                # Debug info to verify it's working
+                st.write(f"Using NNGA format parser. Found {len(df)} tournaments.")
             else:
                 # Use the original parser for other formats
                 df = parse_tournament_text(tournament_text)
