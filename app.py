@@ -67,7 +67,7 @@ def ultra_simple_date_extractor(text, default_year="2025"):
     return f"{year}-{month_value}-{day}"
 
 def standardize_state(state_str):
-    """Convert state names to two-letter abbreviations."""
+    """Convert state names to two-letter abbreviations, handling all 50 states plus DC."""
     if not state_str:
         return None
         
@@ -77,24 +77,38 @@ def standardize_state(state_str):
     state_dict = {
         'ALABAMA': 'AL', 'ALASKA': 'AK', 'ARIZONA': 'AZ', 'ARKANSAS': 'AR',
         'CALIFORNIA': 'CA', 'COLORADO': 'CO', 'CONNECTICUT': 'CT', 'DELAWARE': 'DE',
-        'FLORIDA': 'FL', 'GEORGIA': 'GA', 'HAWAII': 'HI', 'IDAHO': 'ID',
-        'ILLINOIS': 'IL', 'INDIANA': 'IN', 'IOWA': 'IA', 'KANSAS': 'KS',
-        'KENTUCKY': 'KY', 'LOUISIANA': 'LA', 'MAINE': 'ME', 'MARYLAND': 'MD',
-        'MASSACHUSETTS': 'MA', 'MICHIGAN': 'MI', 'MINNESOTA': 'MN', 'MISSISSIPPI': 'MS',
-        'MISSOURI': 'MO', 'MONTANA': 'MT', 'NEBRASKA': 'NE', 'NEVADA': 'NV',
-        'NEW HAMPSHIRE': 'NH', 'NEW JERSEY': 'NJ', 'NEW MEXICO': 'NM', 'NEW YORK': 'NY',
-        'NORTH CAROLINA': 'NC', 'NORTH DAKOTA': 'ND', 'OHIO': 'OH', 'OKLAHOMA': 'OK',
-        'OREGON': 'OR', 'PENNSYLVANIA': 'PA', 'RHODE ISLAND': 'RI', 'SOUTH CAROLINA': 'SC',
-        'SOUTH DAKOTA': 'SD', 'TENNESSEE': 'TN', 'TEXAS': 'TX', 'UTAH': 'UT',
-        'VERMONT': 'VT', 'VIRGINIA': 'VA', 'WASHINGTON': 'WA', 'WEST VIRGINIA': 'WV',
-        'WISCONSIN': 'WI', 'WYOMING': 'WY', 'DISTRICT OF COLUMBIA': 'DC'
+        'DISTRICT OF COLUMBIA': 'DC', 'FLORIDA': 'FL', 'GEORGIA': 'GA', 'HAWAII': 'HI',
+        'IDAHO': 'ID', 'ILLINOIS': 'IL', 'INDIANA': 'IN', 'IOWA': 'IA',
+        'KANSAS': 'KS', 'KENTUCKY': 'KY', 'LOUISIANA': 'LA', 'MAINE': 'ME',
+        'MARYLAND': 'MD', 'MASSACHUSETTS': 'MA', 'MICHIGAN': 'MI', 'MINNESOTA': 'MN',
+        'MISSISSIPPI': 'MS', 'MISSOURI': 'MO', 'MONTANA': 'MT', 'NEBRASKA': 'NE',
+        'NEVADA': 'NV', 'NEW HAMPSHIRE': 'NH', 'NEW JERSEY': 'NJ', 'NEW MEXICO': 'NM',
+        'NEW YORK': 'NY', 'NORTH CAROLINA': 'NC', 'NORTH DAKOTA': 'ND', 'OHIO': 'OH',
+        'OKLAHOMA': 'OK', 'OREGON': 'OR', 'PENNSYLVANIA': 'PA', 'RHODE ISLAND': 'RI',
+        'SOUTH CAROLINA': 'SC', 'SOUTH DAKOTA': 'SD', 'TENNESSEE': 'TN', 'TEXAS': 'TX',
+        'UTAH': 'UT', 'VERMONT': 'VT', 'VIRGINIA': 'VA', 'WASHINGTON': 'WA',
+        'WEST VIRGINIA': 'WV', 'WISCONSIN': 'WI', 'WYOMING': 'WY',
+        # Common variations and abbreviations
+        'WASH': 'WA', 'PENN': 'PA', 'PENNA': 'PA', 'MASS': 'MA', 'TENN': 'TN', 
+        'CALIF': 'CA', 'COLO': 'CO', 'FLA': 'FL', 'ILL': 'IL', 'MICH': 'MI', 
+        'MINN': 'MN', 'MISS': 'MS', 'MONT': 'MT', 'OKLA': 'OK', 'ORE': 'OR', 
+        'WASH DC': 'DC', 'D.C.': 'DC', 'WASH D.C.': 'DC',
+        # British Columbia and Canadian provinces (since some tournaments are there)
+        'BRITISH COLUMBIA': 'BC', 'ALBERTA': 'AB', 'SASKATCHEWAN': 'SK',
+        'MANITOBA': 'MB', 'ONTARIO': 'ON', 'QUEBEC': 'QC', 'NEW BRUNSWICK': 'NB',
+        'NOVA SCOTIA': 'NS', 'PRINCE EDWARD ISLAND': 'PE', 'NEWFOUNDLAND': 'NL',
+        'YUKON': 'YT', 'NORTHWEST TERRITORIES': 'NT', 'NUNAVUT': 'NU'
     }
     
-    # If already an abbreviation
+    # If already a valid abbreviation
     if len(state_str) == 2:
-        return state_str
+        # Check if it's a valid state code
+        valid_states = set(state_dict.values())
+        if state_str in valid_states:
+            return state_str
+        return state_str  # Return as-is if not recognized but right length
     
-    # If it's a full state name
+    # If it's a full state name or variation
     return state_dict.get(state_str, state_str)
 
 def determine_gender(tournament_name):
@@ -723,15 +737,20 @@ def parse_usga_view_format(text):
         # Return empty DataFrame with all required columns
         return pd.DataFrame(columns=REQUIRED_COLUMNS)
     
-def parse_amateur_golf_format(text, default_year="2025", default_state=None):
+def parse_amateur_golf_format_improved(text, default_year="2025", default_state=None):
     """
-    Parser specifically for the standard Amateur Golf tournament format.
-    This format follows a consistent pattern across different state golf associations.
+    Improved parser for amateur golf tournaments that can handle both:
     
-    Format expected:
+    Format 1 (5 lines):
     Course Name
     Tournament Name
     Course Name (repeated)
+    City, State
+    Date Range
+    
+    Format 2 (4 lines):
+    Tournament Name
+    Course Name
     City, State
     Date Range
     
@@ -766,32 +785,178 @@ def parse_amateur_golf_format(text, default_year="2025", default_state=None):
     }
     
     tournaments = []
-    i = 0
     
     # Debug output
     st.write(f"Amateur Golf format parser: Processing {len(lines)} lines")
     
-    # Process in groups of 5 lines
-    while i <= len(lines) - 5:
-        course1 = lines[i]
-        tournament_name = lines[i+1]
-        course2 = lines[i+2]
-        location = lines[i+3]
-        date_range = lines[i+4]
+    # First, detect which format we're likely dealing with
+    format_type = None
+    
+    # Try to detect 5-line format (course-tournament-course pattern)
+    has_course_repetition = False
+    for i in range(len(lines) - 2):
+        if i+2 < len(lines) and (lines[i] == lines[i+2] or 
+                                 (len(lines[i]) > 5 and len(lines[i+2]) > 5 and 
+                                 (lines[i] in lines[i+2] or lines[i+2] in lines[i]))):
+            has_course_repetition = True
+            st.write(f"Detected course repetition at lines {i} and {i+2}")
+            break
+    
+    # Count how many lines have location patterns (City, ST)
+    location_count = 0
+    for line in lines:
+        if re.search(r'(.*?),\s+([A-Z]{2})$', line):
+            location_count += 1
+    
+    # Check if the first few chunks make sense as 4-line or 5-line chunks
+    line_count = len(lines)
+    
+    if has_course_repetition and line_count % 5 == 0:
+        format_type = "5-line"
+        st.write("Detected 5-line format (Course-Tournament-Course-Location-Date)")
+    elif location_count > 0 and line_count % 4 == 0:
+        format_type = "4-line"
+        st.write("Detected 4-line format (Tournament-Course-Location-Date)")
+    # If still uncertain, check the first few chunks
+    else:
+        # Check the first few chunks to see what fits better
+        sample_5line = True
+        sample_4line = True
         
-        # Verify this is a tournament block (course names should match or be similar)
-        courses_match = False
-        if course1 == course2:
-            courses_match = True
-        elif len(course1) > 5 and len(course2) > 5 and (course1 in course2 or course2 in course1):
-            courses_match = True
+        # Check if first 5 lines fit the 5-line pattern
+        if len(lines) >= 5:
+            if not (lines[0] == lines[2] or (len(lines[0]) > 5 and len(lines[2]) > 5 and 
+                                           (lines[0] in lines[2] or lines[2] in lines[0]))):
+                sample_5line = False
+        
+        # Check if first 4 lines fit the 4-line pattern
+        if len(lines) >= 4:
+            if not re.search(r'(.*?),\s+([A-Z]{2})$', lines[2]):
+                sample_4line = False
+        
+        # Decide based on pattern match
+        if sample_5line and not sample_4line:
+            format_type = "5-line"
+            st.write("Inferred 5-line format from sample")
+        elif sample_4line and not sample_5line:
+            format_type = "4-line"
+            st.write("Inferred 4-line format from sample")
         else:
-            # Check for common golf terms
-            common_terms = ["Country Club", "Golf Club", "Golf Course", "GC", "CC"]
-            if any(term in course1 and term in course2 for term in common_terms):
+            # Default to 4-line since it's simpler
+            format_type = "4-line"
+            st.write("Defaulting to 4-line format")
+    
+    # Process according to detected format
+    if format_type == "5-line":
+        # Process in chunks of 5 lines (Course-Tournament-Course-Location-Date)
+        i = 0
+        while i <= len(lines) - 5:
+            course1 = lines[i]
+            tournament_name = lines[i+1]
+            course2 = lines[i+2]
+            location = lines[i+3]
+            date_range = lines[i+4]
+            
+            # Verify courses match or are similar
+            courses_match = False
+            if course1 == course2:
                 courses_match = True
-        
-        if courses_match:
+            elif len(course1) > 5 and len(course2) > 5 and (course1 in course2 or course2 in course1):
+                courses_match = True
+            else:
+                # Check for common golf terms
+                common_terms = ["Country Club", "Golf Club", "Golf Course", "GC", "CC"]
+                if any(term in course1 and term in course2 for term in common_terms):
+                    courses_match = True
+            
+            if courses_match:
+                # Extract city and state from location
+                location_match = re.search(r'(.*?),\s+([A-Z]{2})$', location)
+                if location_match:
+                    city = location_match.group(1).strip()
+                    state = location_match.group(2).strip()
+                    
+                    # Extract date from date range
+                    date_match = re.search(r'([A-Za-z]+)\s+(\d{1,2}),?\s+(\d{4})', date_range)
+                    if date_match:
+                        month_name = date_match.group(1)
+                        day = date_match.group(2)
+                        year = date_match.group(3)
+                        
+                        # Get month number
+                        month = month_map.get(month_name[:3], '01')
+                        
+                        # Format date
+                        date_value = f"{year}-{month}-{day.zfill(2)}"
+                        
+                        # Determine category and gender
+                        name_lower = tournament_name.lower()
+                        category = "Men's"  # Default
+                        gender = "Men's"    # Default
+                        
+                        # Category detection
+                        if "mid-amateur" in name_lower or "mid amateur" in name_lower:
+                            category = "Mid-Amateur"
+                        elif "match play" in name_lower:
+                            category = "Match Play"
+                        elif "senior" in name_lower and "super" not in name_lower:
+                            category = "Seniors"
+                        elif "super senior" in name_lower:
+                            category = "Super Senior"
+                        elif "junior" in name_lower and "girls" not in name_lower and "boys" not in name_lower:
+                            category = "Junior's"
+                        elif "junior girls" in name_lower or "girls junior" in name_lower:
+                            category = "Junior's"
+                            gender = "Women's"
+                        elif "junior boys" in name_lower or "boys junior" in name_lower:
+                            category = "Junior's"
+                        elif "amateur" in name_lower and "mid-amateur" not in name_lower:
+                            category = "Amateur"
+                        elif "open" in name_lower:
+                            category = "Open"
+                        elif "four-ball" in name_lower:
+                            category = "Four-Ball"
+                        elif "better ball" in name_lower:
+                            category = "Better Ball"
+                        elif "father" in name_lower and "son" in name_lower:
+                            category = "Father & Son"
+                        elif "parent" in name_lower and "child" in name_lower:
+                            category = "Parent & Child"
+                        elif "mixed" in name_lower or "pinehurst" in name_lower:
+                            category = "Mixed/Couples"
+                            gender = "Mixed"
+                        elif "women" in name_lower or "ladies" in name_lower:
+                            category = "Women's"
+                            gender = "Women's"
+                        elif "public links" in name_lower:
+                            category = "Public Links"
+                        
+                        # Create tournament entry
+                        tournament = {
+                            "Date": date_value,
+                            "Name": tournament_name,
+                            "Course": course1,
+                            "Category": category,
+                            "Gender": gender,
+                            "City": city,
+                            "State": state,
+                            "Zip": None
+                        }
+                        
+                        tournaments.append(tournament)
+                        st.write(f"✓ Added tournament (5-line): {tournament_name}")
+            
+            # Move to next block of 5 lines
+            i += 5
+    else:  # 4-line format
+        # Process in chunks of 4 lines (Tournament-Course-Location-Date)
+        i = 0
+        while i <= len(lines) - 4:
+            tournament_name = lines[i]
+            course_name = lines[i+1]
+            location = lines[i+2]
+            date_range = lines[i+3]
+            
             # Extract city and state from location
             location_match = re.search(r'(.*?),\s+([A-Z]{2})$', location)
             if location_match:
@@ -825,7 +990,12 @@ def parse_amateur_golf_format(text, default_year="2025", default_state=None):
                         category = "Seniors"
                     elif "super senior" in name_lower or "super-senior" in name_lower:
                         category = "Super Senior"
-                    elif "junior" in name_lower:
+                    elif "junior" in name_lower and "girls" not in name_lower and "boys" not in name_lower:
+                        category = "Junior's"
+                    elif "junior girls" in name_lower or "girls junior" in name_lower:
+                        category = "Junior's"
+                        gender = "Women's"
+                    elif "junior boys" in name_lower or "boys junior" in name_lower:
                         category = "Junior's"
                     elif "amateur" in name_lower and "mid-amateur" not in name_lower:
                         category = "Amateur"
@@ -849,12 +1019,17 @@ def parse_amateur_golf_format(text, default_year="2025", default_state=None):
                         category = "Public Links"
                     elif "stroke play" in name_lower:
                         category = "Stroke Play"
+                    elif "pga" in name_lower and not any(x in name_lower for x in ["women", "ladies", "girls"]):
+                        category = "Professional"
+                    elif "lpga" in name_lower:
+                        category = "Professional"
+                        gender = "Women's"
                     
                     # Create tournament entry
                     tournament = {
                         "Date": date_value,
                         "Name": tournament_name,
-                        "Course": course1,
+                        "Course": course_name,
                         "Category": category,
                         "Gender": gender,
                         "City": city,
@@ -863,10 +1038,10 @@ def parse_amateur_golf_format(text, default_year="2025", default_state=None):
                     }
                     
                     tournaments.append(tournament)
-                    st.write(f"✓ Added tournament: {tournament_name}")
-        
-        # Move to next block of 5 lines
-        i += 5
+                    st.write(f"✓ Added tournament (4-line): {tournament_name}")
+            
+            # Move to next block of 4 lines
+            i += 4
     
     # Convert to DataFrame
     if tournaments:
@@ -881,7 +1056,7 @@ def parse_amateur_golf_format(text, default_year="2025", default_state=None):
         # Return empty DataFrame
         st.write("Amateur Golf parser: No tournaments found")
         return pd.DataFrame(columns=["Date", "Name", "Course", "Category", "Gender", "City", "State", "Zip"])
-
+    
 def parse_robust_nnga_tournaments(text, year="2025", default_state=None):
     """
     Robust parser for NNGA tournament format that handles variable line spacing.
@@ -3509,17 +3684,13 @@ def ensure_column_order(df):
 if st.button("Process Tournament Data"):
     if tournament_text:
         try:
-            # BYPASS the format detection system completely for all special formats
+            # Try the improved unified Amateur Golf format parser first
+            df = parse_amateur_golf_format_improved(tournament_text, year, default_state)
             
-            # First try the Amateur Golf format (course-tournament-course pattern)
-            # This works for all state golf associations, not just NJ
-            amateur_df = parse_amateur_golf_format(tournament_text, year, default_state)
+            if not df.empty:
+                st.write(f"Successfully parsed {len(df)} tournaments using improved Amateur Golf format parser")
             
-            if not amateur_df.empty:
-                st.write("Successfully parsed using Amateur Golf format parser")
-                df = amateur_df
-            
-            # If Amateur Golf parser didn't work, try other formats
+            # If that didn't work, try other formats
             elif "View" in tournament_text:
                 st.write("Detected NNGA format - using specialized parser")
                 # Use whichever NNGA parser function exists in your code
@@ -3544,9 +3715,9 @@ if st.button("Process Tournament Data"):
                 
                 # Count pattern occurrences: day number followed by month name
                 month_names = ['Jan', 'January', 'Feb', 'February', 'Mar', 'March', 
-                               'Apr', 'April', 'May', 'Jun', 'June', 'Jul', 'July', 
-                               'Aug', 'August', 'Sep', 'September', 'Oct', 'October',
-                               'Nov', 'November', 'Dec', 'December']
+                             'Apr', 'April', 'May', 'Jun', 'June', 'Jul', 'July', 
+                             'Aug', 'August', 'Sep', 'September', 'Oct', 'October',
+                             'Nov', 'November', 'Dec', 'December']
                 
                 pattern_count = 0
                 for i in range(len(lines) - 1):
@@ -3559,7 +3730,7 @@ if st.button("Process Tournament Data"):
                     df = parse_day_month_tournament_format(tournament_text, year, default_state)
                 else:
                     # Fall back to standard format detection
-                    st.write("Number detected but not Day-Month pattern - using standard detection")
+                    st.write("Using standard format detection")
                     df = parse_tournament_text(tournament_text)
             else:
                 # For other formats, use the original format detection and parsing
