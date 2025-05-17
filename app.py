@@ -2944,7 +2944,7 @@ if st.button("Process Tournament Data"):
             # Check for NNGA format by looking for "View" lines (very specific format)
             if "View" in tournament_text:
                 st.write("Detected NNGA format - using specialized parser")
-                df = parse_nnga_format(tournament_text, year, default_state)
+                df = parse_nnga_data(tournament_text, year, default_state)  # Changed from parse_nnga_format to parse_nnga_data
             else:
                 # For other formats, use the original format detection and parsing
                 st.write("Using standard format detection")
