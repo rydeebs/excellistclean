@@ -2893,6 +2893,49 @@ def parse_nnga_data(text_input, default_year="2025", default_state=None):
         # Return empty DataFrame with required columns
         return pd.DataFrame(columns=["Date", "Name", "Course", "Category", "Gender", "City", "State", "Zip"])
 
+def parse_tournament_text(text):
+    """
+    Main function to detect format and parse tournament text.
+    Uses format detection to determine which parser to use.
+    """
+    # Detect the format
+    format_type = detect_format(text)
+    st.write(f"Detected format: {format_type}")
+    
+    # Parse based on detected format
+    if format_type == "MONTANA_FORMAT":
+        return parse_montana_format(text)
+    elif format_type == "MISSOURI_FORMAT":
+        return parse_missouri_tournament_format(text)
+    elif format_type == "GAM_CHAMPIONSHIP_FORMAT":
+        return parse_gam_championship_format(text)
+    elif format_type == "COURSE_FIRST_FORMAT":
+        return parse_course_first_format(text)
+    elif format_type == "NAME_DATE_COURSE_FORMAT":
+        return parse_name_date_course_format(text)
+    elif format_type == "CDGA_FORMAT":
+        return parse_cdga_format(text)
+    elif format_type == "EVENTS_WITH_SECTIONS_FORMAT":
+        return parse_events_with_sections_format(text)
+    elif format_type == "SIMPLE_DATE_CLUB_CITY_FORMAT":
+        return parse_simple_date_club_city_format(text)
+    elif format_type == "ENTRIES_CLOSE_FORMAT":
+        return parse_entries_close_format(text)
+    elif format_type == "CHAMPIONSHIP_TABLE_FORMAT":
+        return parse_championship_table_format(text)
+    elif format_type == "FOUR_LINE_FORMAT":
+        return parse_four_line_format(text)
+    elif format_type == "MARKDOWN_FORMAT":
+        return parse_markdown_format(text)
+    elif format_type == "CUSTOM_FORMAT":
+        return parse_custom_format(text)
+    elif format_type == "STATUS_BASED_FORMAT":
+        return parse_status_based_format(text)
+    else:
+        # If no specific format is detected, try the most generic parser
+        st.write("No specific format detected, trying generic parser")
+        return parse_status_based_format(text)  # Use status-based format as fallback
+
 # Define the Streamlit app
 st.title("NNGA Tournament Parser")
 st.write("Paste NNGA tournament data below to parse it into a structured format.")
