@@ -3355,7 +3355,7 @@ if st.button("Process Tournament Data"):
             # First check for NNGA format with "View" lines
             if "View" in tournament_text:
                 st.write("Detected NNGA format - using specialized parser")
-                df = parse_nnga_format(tournament_text, year, default_state)
+                df = parse_nnga_data(tournament_text, year, default_state)  # Changed from parse_nnga_format to parse_nnga_data
             
             # Check for monthly entries format with month headers
             elif re.search(r'Entry Deadline:|Entries Closed|Entries Open:', tournament_text):
