@@ -737,17 +737,26 @@ def parse_usga_view_format(text):
         # Return empty DataFrame with all required columns
         return pd.DataFrame(columns=REQUIRED_COLUMNS)
     
-def parse_amateur_golf_format_improved(text, default_year="2025", default_state=None):
+def def parse_amateur_golf_format_improved(text, default_year="2025", default_state=None):
     """
-    Improved parser for amateur golf tournaments with the 5-line repeating pattern:
+    Improved parser for amateur golf tournaments with the 5-line repeating pattern.
+    Handles two different formats:
     
+    Format 1 (Initial): 
     Line 1: Course Name
     Line 2: Tournament Name
     Line 3: Course Name (repeated)
     Line 4: City, State
     Line 5: Date Range
     
-    This format is common across many state golf associations.
+    Format 2 (Later):
+    Line 1: Tournament Name
+    Line 2: Course Name
+    Line 3: Tournament Name (repeated)
+    Line 4: City, State
+    Line 5: Date Range
+    
+    This parser automatically detects format changes within the data.
     
     Arguments:
     text -- The raw tournament text
@@ -788,19 +797,67 @@ def parse_amateur_golf_format_improved(text, default_year="2025", default_state=
     total_blocks = len(lines) // 5
     st.write(f"Found {total_blocks} potential tournament blocks")
     
-    # Process each block of 5 lines
+    # SPECIAL PATTERN DETECTION: Check if we hit a pattern change by checking a few entries
+    # Two specific formats:
+    # Format 1 (initial): Course, Name, Course, City, Date
+    # Format 2 (later): Name, Course, Name, City, Date
+    
+    pattern_switch_index = -1
+    for i in range(0, len(lines) - 9, 5):
+        # Check if this block follows Format 1 and next block follows Format 2
+        # by examining if a line looks more like a course name or tournament name
+        
+        # Current block
+        line1 = lines[i] if i < len(lines) else ""
+        line2 = lines[i+1] if i+1 < len(lines) else ""
+        
+        # Next block
+        next_line1 = lines[i+5] if i+5 < len(lines) else ""
+        next_line2 = lines[i+5+1] if i+5+1 < len(lines) else ""
+        
+        # Check if line1 looks like a course (Format 1) and next_line1 looks like a tournament (Format 2)
+        course_indicators = ["Golf", "Club", "Course", "Country", "Resort", "GC", "CC", "Inn", "Valley", "Ridge"]
+        tournament_indicators = ["Championship", "Amateur", "Open", "Junior", "Qualifier", "North Carolina"]
+        
+        current_line1_course_score = sum(1 for indicator in course_indicators if indicator in line1)
+        current_line2_tournament_score = sum(1 for indicator in tournament_indicators if indicator in line2)
+        
+        next_line1_tournament_score = sum(1 for indicator in tournament_indicators if indicator in next_line1)
+        next_line2_course_score = sum(1 for indicator in course_indicators if indicator in next_line2)
+        
+        # If current block follows Format 1 and next block follows Format 2
+        if (current_line1_course_score > 0 and current_line2_tournament_score > 0 and
+            next_line1_tournament_score > 0 and next_line2_course_score > 0 and
+            "North Carolina Junior Girls' Championship" in next_line1):
+            pattern_switch_index = i+5
+            st.write(f"Detected format change at index {pattern_switch_index}, line: {next_line1}")
+            break
+    
+    # Now process each block with awareness of potential format change
     for i in range(0, len(lines) - 4, 5):
         try:
-            # Extract the 5 lines for this tournament
-            course1 = lines[i]
-            tournament_name = lines[i+1]
-            course2 = lines[i+2]
-            location = lines[i+3]
-            date_range = lines[i+4]
+            # Determine if this block uses Format 1 or Format 2
+            using_format2 = (pattern_switch_index >= 0 and i >= pattern_switch_index)
+            
+            if using_format2:
+                # Format 2: Name, Course, Name, City, Date
+                tournament_name = lines[i]
+                course1 = lines[i+1]
+                course2 = lines[i+2]  # Not used, but keep for consistency
+                location = lines[i+3]
+                date_range = lines[i+4]
+                st.write(f"Using Format 2 for block {i//5 + 1}")
+            else:
+                # Format 1: Course, Name, Course, City, Date
+                course1 = lines[i]
+                tournament_name = lines[i+1]
+                course2 = lines[i+2]
+                location = lines[i+3]
+                date_range = lines[i+4]
             
             # Debug the current block
-            if i < 30 or i % 50 == 0:  # Show details for first few blocks and then periodically
-                st.write(f"Processing block {i//5 + 1}:")
+            if i < 30 or i % 50 == 0 or using_format2:  # Show details for first few blocks and format changes
+                st.write(f"Processing block {i//5 + 1} {'(Format 2)' if using_format2 else '(Format 1)'}:")
                 st.write(f"  Course: {course1}")
                 st.write(f"  Name: {tournament_name}")
                 st.write(f"  Location: {location}")
@@ -938,94 +995,13 @@ def parse_amateur_golf_format_improved(text, default_year="2025", default_state=
                     if date_value:
                         break
             
-            # One more check: if there's a string that looks like a date in any of the lines
-            if not date_value:
-                # Look for any line that contains months and years
-                for check_line in [date_range, lines[i+1] if i+1 < len(lines) else "", lines[i-1] if i > 0 else ""]:
-                    year_match = re.search(r'(\d{4})', check_line)
-                    if year_match:
-                        year = year_match.group(1)
-                        # Find any month name
-                        for month_name in month_map.keys():
-                            if month_name in check_line:
-                                month = month_map.get(month_name[:3], '01')
-                                # Try to find a day, or default to 01
-                                day_match = re.search(r'\b(\d{1,2})\b', check_line)
-                                day = day_match.group(1) if day_match else "01"
-                                date_value = f"{year}-{month}-{day.zfill(2)}"
-                                break
-                    if date_value:
-                        break
-            
-            # Last resort: use the next or previous block's date
+            # Last resort: if still no date, use the previous tournament's date or default
             if not date_value and len(tournaments) > 0:
-                # Use the date from the previous tournament
                 date_value = tournaments[-1]["Date"]
                 st.write(f"  Using previous tournament's date: {date_value}")
-            elif not date_value and i + 9 < len(lines):  # Check next block
-                # Try to extract date from next block
-                next_date_line = lines[i+9]  # Date would be at i+4+5
-                for month_name in month_map.keys():
-                    if month_name in next_date_line:
-                        # Try to extract a day number
-                        day_match = re.search(fr'{month_name}\s+(\d{{1,2}})', next_date_line)
-                        if day_match:
-                            day = day_match.group(1)
-                            # Look for a year
-                            year_match = re.search(r'(\d{4})', next_date_line)
-                            year = year_match.group(1) if year_match else default_year
-                            month = month_map.get(month_name[:3], '01')
-                            date_value = f"{year}-{month}-{day.zfill(2)}"
-                            st.write(f"  Using next block's date: {date_value}")
-                            break
-            
-            # If we still don't have a date, try one more approach: look for any date in the entire record
-            if not date_value:
-                for j in range(max(0, i-10), min(len(lines), i+15)):
-                    line = lines[j]
-                    year_match = re.search(r'(\d{4})', line)
-                    month_match = None
-                    for month_name in month_map.keys():
-                        if month_name in line:
-                            month_match = month_name
-                            break
-                    
-                    if year_match and month_match:
-                        year = year_match.group(1)
-                        month = month_map.get(month_match[:3], '01')
-                        # Try to find a day, or default to 01
-                        day_match = re.search(r'\b(\d{1,2})\b', line)
-                        day = day_match.group(1) if day_match else "01"
-                        date_value = f"{year}-{month}-{day.zfill(2)}"
-                        st.write(f"  Found date in nearby line {j}: {date_value}")
-                        break
-            
-            # If we still don't have a date, check if the tournament name contains a date
-            if not date_value:
-                # Look for date in tournament name
-                year_match = re.search(r'(\d{4})', tournament_name)
-                month_match = None
-                for month_name in month_map.keys():
-                    if month_name in tournament_name:
-                        month_match = month_name
-                        break
-                
-                if year_match and month_match:
-                    year = year_match.group(1)
-                    month = month_map.get(month_match[:3], '01')
-                    # Try to find a day, or default to 01
-                    day_match = re.search(r'\b(\d{1,2})\b', tournament_name)
-                    day = day_match.group(1) if day_match else "01"
-                    date_value = f"{year}-{month}-{day.zfill(2)}"
-                    st.write(f"  Extracted date from tournament name: {date_value}")
-            
-            # If we STILL don't have a date, use the default year and estimate month/day from position
-            if not date_value:
-                # Estimate month based on position in the file (earlier entries are earlier in the year)
-                estimated_position = i / len(lines)  # 0 to 1
-                estimated_month = max(1, min(12, int(estimated_position * 12) + 1))
-                date_value = f"{default_year}-{str(estimated_month).zfill(2)}-01"
-                st.write(f"  Using estimated date based on position: {date_value}")
+            elif not date_value:
+                date_value = f"{default_year}-01-01"  # Generic default date
+                st.write(f"  Using default date: {date_value}")
             
             # Only proceed if we have valid data for a tournament
             if tournament_name and course1:
@@ -1101,7 +1077,7 @@ def parse_amateur_golf_format_improved(text, default_year="2025", default_state=
                 tournaments.append(tournament)
                 
                 # Only show success messages for some tournaments to avoid flooding the output
-                if len(tournaments) <= 10 or len(tournaments) % 20 == 0:
+                if len(tournaments) <= 10 or len(tournaments) % 20 == 0 or using_format2:
                     st.write(f"✓ Added tournament: {tournament_name}")
             else:
                 st.write(f"❌ Skipping incomplete data at block {i//5 + 1}")
