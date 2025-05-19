@@ -739,7 +739,7 @@ def parse_usga_view_format(text):
     
 def parse_amateur_golf_format_improved(text, default_year="2025", default_state=None):
     """
-    Improved parser for amateur golf tournaments that can handle multiple formats:
+    Comprehensive parser for amateur golf tournaments that can handle multiple formats:
     
     Format 1 (5 lines):
     Course Name
@@ -757,6 +757,12 @@ def parse_amateur_golf_format_improved(text, default_year="2025", default_state=
     Format 3 (3 lines):
     Tournament Name
     Course Name
+    Date Range
+    
+    Format 4 (4 lines with course first):
+    Course Name
+    Tournament Name
+    City, State
     Date Range
     
     Handles unlimited number of tournaments with no row limitations.
@@ -821,57 +827,62 @@ def parse_amateur_golf_format_improved(text, default_year="2025", default_state=
         if re.search(r'(January|February|March|April|May|June|July|August|September|October|November|December|Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d{1,2}', line):
             date_count += 1
     
-    # Check if the lines make sense as 3-line, 4-line or 5-line chunks
-    line_count = len(lines)
-    
-    if has_course_repetition and line_count % 5 == 0:
-        format_type = "5-line"
-        st.write("Detected 5-line format (Course-Tournament-Course-Location-Date)")
-    elif location_count > 0 and line_count % 4 == 0:
-        format_type = "4-line"
-        st.write("Detected 4-line format (Tournament-Course-Location-Date)")
-    elif date_count > 0 and line_count % 3 == 0:
-        # Check if third line of each chunk has a date
-        date_in_third_line = True
-        for i in range(2, line_count, 3):
-            if i < line_count and not re.search(r'(January|February|March|April|May|June|July|August|September|October|November|December|Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d{1,2}', lines[i]):
-                date_in_third_line = False
-                break
+    # Check if this is course-first format
+    # In this format, every 4th line (i+3) is a date, and the 3rd line (i+2) is a location
+    course_first_format = False
+    if len(lines) >= 8 and len(lines) % 4 == 0:  # Need at least 2 blocks of 4
+        course_first_count = 0
+        for i in range(0, len(lines), 4):
+            if (i+3 < len(lines) and 
+                re.search(r'(January|February|March|April|May|June|July|August|September|October|November|December|Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d{1,2}', lines[i+3]) and
+                re.search(r'(.*?),\s+([A-Z]{2})$', lines[i+2])):
+                course_first_count += 1
         
-        if date_in_third_line:
-            format_type = "3-line"
-            st.write("Detected 3-line format (Tournament-Course-Date)")
+        if course_first_count >= len(lines) // 8:  # At least 1/2 of potential blocks match
+            format_type = "4-line-course-first"
+            st.write(f"Detected 4-line course-first format with {course_first_count} matches")
     
-    # If format still not determined, check more specifically
+    # If format not determined, check other formats
     if not format_type:
-        # Try 3-line format first (it's more restrictive)
-        if line_count % 3 == 0:
-            # Count how many potential chunks match the 3-line pattern
-            matches = 0
-            for i in range(0, line_count, 3):
-                if i+2 < line_count and re.search(r'(January|February|March|April|May|June|July|August|September|October|November|December|Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d{1,2}', lines[i+2]):
-                    matches += 1
-            
-            if matches >= line_count // 6:  # At least 1/2 of potential chunks match
-                format_type = "3-line"
-                st.write(f"Inferred 3-line format based on {matches} matches")
-        
-        # Then try 4-line format
-        if not format_type and line_count % 4 == 0:
+        if has_course_repetition and len(lines) % 5 == 0:
+            format_type = "5-line"
+            st.write("Detected 5-line format (Course-Tournament-Course-Location-Date)")
+        elif location_count > 0 and len(lines) % 4 == 0:
             format_type = "4-line"
-            st.write("Defaulting to 4-line format based on line count")
+            st.write("Detected 4-line format (Tournament-Course-Location-Date)")
+        elif date_count > 0 and len(lines) % 3 == 0:
+            # Check if third line of each chunk has a date
+            date_in_third_line = True
+            for i in range(2, len(lines), 3):
+                if i < len(lines) and not re.search(r'(January|February|March|April|May|June|July|August|September|October|November|December|Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d{1,2}', lines[i]):
+                    date_in_third_line = False
+                    break
+            
+            if date_in_third_line:
+                format_type = "3-line"
+                st.write("Detected 3-line format (Tournament-Course-Date)")
         
-        # Finally default to 3-line if nothing else fits
+        # If still not determined, check more specifically
         if not format_type:
-            if line_count % 3 == 0:
+            # Default to most likely format based on line count and patterns
+            if len(lines) % 4 == 0 and location_count >= len(lines) // 8:
+                format_type = "4-line-course-first"  # Most complex format, try first
+                st.write("Defaulting to 4-line course-first format based on line count and location patterns")
+            elif len(lines) % 3 == 0:
                 format_type = "3-line"
                 st.write("Defaulting to 3-line format based on line count")
+            elif len(lines) % 4 == 0:
+                format_type = "4-line"
+                st.write("Defaulting to 4-line format based on line count")
+            elif len(lines) % 5 == 0:
+                format_type = "5-line"
+                st.write("Defaulting to 5-line format based on line count")
             else:
                 # Choose the format with the least remainder
                 remainders = {
-                    "3-line": line_count % 3,
-                    "4-line": line_count % 4,
-                    "5-line": line_count % 5
+                    "3-line": len(lines) % 3,
+                    "4-line": len(lines) % 4,
+                    "5-line": len(lines) % 5
                 }
                 min_remainder = min(remainders.values())
                 for fmt, rem in remainders.items():
@@ -987,6 +998,106 @@ def parse_amateur_golf_format_improved(text, default_year="2025", default_state=
             
             # Move to next block of 5 lines
             i += 5
+    
+    elif format_type == "4-line-course-first":
+        # Process in chunks of 4 lines (Course-Tournament-Location-Date)
+        i = 0
+        while i <= len(lines) - 4:
+            course_name = lines[i]
+            tournament_name = lines[i+1]
+            location = lines[i+2]
+            date_range = lines[i+3]
+            
+            # Extract city and state from location
+            location_match = re.search(r'(.*?),\s+([A-Z]{2})$', location)
+            city = None
+            state = default_state
+            
+            if location_match:
+                city = location_match.group(1).strip()
+                state = location_match.group(2).strip()
+                
+            # Extract date from date range
+            date_match = re.search(r'([A-Za-z]+)\s+(\d{1,2}),?\s+(\d{4})', date_range)
+            if date_match:
+                month_name = date_match.group(1)
+                day = date_match.group(2)
+                year = date_match.group(3)
+                
+                # Get month number
+                month = month_map.get(month_name[:3], '01')
+                
+                # Format date
+                date_value = f"{year}-{month}-{day.zfill(2)}"
+                
+                # Determine category and gender
+                name_lower = tournament_name.lower()
+                category = "Men's"  # Default
+                gender = "Men's"    # Default
+                
+                # Category detection
+                if "mid-amateur" in name_lower or "mid-amateur" in name_lower:
+                    category = "Mid-Amateur"
+                elif "match play" in name_lower:
+                    category = "Match Play"
+                elif "senior" in name_lower and "super" not in name_lower and "women" not in name_lower:
+                    category = "Seniors"
+                elif "super senior" in name_lower or "super-senior" in name_lower:
+                    category = "Super Senior"
+                elif "junior" in name_lower and "girls" not in name_lower and "boys" not in name_lower:
+                    category = "Junior's"
+                elif "junior girls" in name_lower or "girls junior" in name_lower or "girls'" in name_lower:
+                    category = "Junior's"
+                    gender = "Women's"
+                elif "junior boys" in name_lower or "boys junior" in name_lower or "boys'" in name_lower:
+                    category = "Junior's"
+                elif "amateur" in name_lower and "mid-amateur" not in name_lower:
+                    category = "Amateur"
+                elif "open" in name_lower and "championship" in name_lower:
+                    category = "Open"
+                elif "four-ball" in name_lower:
+                    category = "Four-Ball"
+                elif "better ball" in name_lower:
+                    category = "Better Ball"
+                elif "father" in name_lower and "son" in name_lower:
+                    category = "Father & Son"
+                elif "parent" in name_lower and "child" in name_lower:
+                    category = "Parent & Child"
+                elif "mixed" in name_lower or "pinehurst" in name_lower:
+                    category = "Mixed/Couples"
+                    gender = "Mixed"
+                elif "women" in name_lower or "ladies" in name_lower:
+                    category = "Women's"
+                    gender = "Women's"
+                elif "public links" in name_lower:
+                    category = "Public Links"
+                elif "stroke play" in name_lower:
+                    category = "Stroke Play"
+                elif "pga" in name_lower and not any(x in name_lower for x in ["women", "ladies", "girls"]):
+                    category = "Professional"
+                elif "lpga" in name_lower:
+                    category = "Professional"
+                    gender = "Women's"
+                
+                # Create tournament entry
+                tournament = {
+                    "Date": date_value,
+                    "Name": tournament_name,
+                    "Course": course_name,
+                    "Category": category,
+                    "Gender": gender,
+                    "City": city,
+                    "State": state,
+                    "Zip": None
+                }
+                
+                tournaments.append(tournament)
+                # Only print for the first few tournaments to avoid flooding the output
+                if len(tournaments) <= 10 or len(tournaments) % 10 == 0:
+                    st.write(f"✓ Added tournament #{len(tournaments)} (4-line-course-first): {tournament_name}")
+            
+            # Move to next block of 4 lines
+            i += 4
     
     elif format_type == "4-line":
         # Process in chunks of 4 lines (Tournament-Course-Location-Date)
