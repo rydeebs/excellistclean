@@ -739,9 +739,9 @@ def parse_usga_view_format(text):
     
 def parse_amateur_golf_format_improved(text, default_year="2025", default_state=None):
     """
-    Comprehensive parser for amateur golf tournaments that can handle multiple formats:
+    Improved parser for amateur golf tournaments that can handle multiple formats:
     
-    Format 1 (5 lines):
+    Format 1 (5 lines with repeated course):
     Course Name
     Tournament Name
     Course Name (repeated)
@@ -802,87 +802,204 @@ def parse_amateur_golf_format_improved(text, default_year="2025", default_state=
     # Debug output
     st.write(f"Amateur Golf format parser: Processing {len(lines)} lines")
     
-    # First, detect which format we're likely dealing with
-    format_type = None
-    
-    # Try to detect 5-line format (course-tournament-course pattern)
-    has_course_repetition = False
-    for i in range(len(lines) - 2):
-        if i+2 < len(lines) and (lines[i] == lines[i+2] or 
-                                 (len(lines[i]) > 5 and len(lines[i+2]) > 5 and 
-                                 (lines[i] in lines[i+2] or lines[i+2] in lines[i]))):
-            has_course_repetition = True
-            st.write(f"Detected course repetition at lines {i} and {i+2}")
-            break
-    
-    # Count how many lines have location patterns (City, ST)
-    location_count = 0
-    for line in lines:
-        if re.search(r'(.*?),\s+([A-Z]{2})$', line):
-            location_count += 1
-    
-    # Count how many lines have date patterns
-    date_count = 0
-    for line in lines:
-        if re.search(r'(January|February|March|April|May|June|July|August|September|October|November|December|Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d{1,2}', line):
-            date_count += 1
-    
-    # Check if this is course-first format
-    # In this format, every 4th line (i+3) is a date, and the 3rd line (i+2) is a location
-    course_first_format = False
-    if len(lines) >= 8 and len(lines) % 4 == 0:  # Need at least 2 blocks of 4
-        course_first_count = 0
-        for i in range(0, len(lines), 4):
-            if (i+3 < len(lines) and 
-                re.search(r'(January|February|March|April|May|June|July|August|September|October|November|December|Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d{1,2}', lines[i+3]) and
-                re.search(r'(.*?),\s+([A-Z]{2})$', lines[i+2])):
-                course_first_count += 1
+    # First, check if this is the 5-line repeated course format
+    is_repeated_course_format = False
+    if len(lines) >= 10:  # Need at least 2 tournaments to detect
+        # Check if every 5th line seems to be a date
+        date_pattern_matches = 0
+        for i in range(4, len(lines), 5):
+            if i < len(lines) and re.search(r'(January|February|March|April|May|June|July|August|September|October|November|December|Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d{1,2}', lines[i]):
+                date_pattern_matches += 1
         
-        if course_first_count >= len(lines) // 8:  # At least 1/2 of potential blocks match
-            format_type = "4-line-course-first"
-            st.write(f"Detected 4-line course-first format with {course_first_count} matches")
-    
-    # If format not determined, check other formats
-    if not format_type:
-        if has_course_repetition and len(lines) % 5 == 0:
-            format_type = "5-line"
-            st.write("Detected 5-line format (Course-Tournament-Course-Location-Date)")
-        elif location_count > 0 and len(lines) % 4 == 0:
-            format_type = "4-line"
-            st.write("Detected 4-line format (Tournament-Course-Location-Date)")
-        elif date_count > 0 and len(lines) % 3 == 0:
-            # Check if third line of each chunk has a date
-            date_in_third_line = True
-            for i in range(2, len(lines), 3):
-                if i < len(lines) and not re.search(r'(January|February|March|April|May|June|July|August|September|October|November|December|Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d{1,2}', lines[i]):
-                    date_in_third_line = False
+        # Check if at least half of the potential date lines match
+        potential_date_lines = (len(lines) - 4) // 5
+        if date_pattern_matches >= potential_date_lines // 2 and potential_date_lines > 0:
+            # Also check if the 3rd line repeats the 1st line in at least one entry
+            for i in range(0, len(lines)-4, 5):
+                if lines[i] == lines[i+2] or (len(lines[i]) > 5 and len(lines[i+2]) > 5 and 
+                                             (lines[i] in lines[i+2] or lines[i+2] in lines[i])):
+                    is_repeated_course_format = True
+                    st.write("Detected 5-line repeated course format")
                     break
+    
+    # If confirmed as repeated course format, process it
+    if is_repeated_course_format:
+        # Process in chunks of 5 lines
+        num_chunks = len(lines) // 5
+        for i in range(num_chunks):
+            start_idx = i * 5
             
-            if date_in_third_line:
-                format_type = "3-line"
-                st.write("Detected 3-line format (Tournament-Course-Date)")
+            # If we don't have enough lines for a complete entry, skip
+            if start_idx + 4 >= len(lines):
+                break
+                
+            course1 = lines[start_idx]
+            tournament_name = lines[start_idx + 1]
+            course2 = lines[start_idx + 2]
+            location = lines[start_idx + 3]
+            date_range = lines[start_idx + 4]
+            
+            # Extract city and state from location line
+            state = default_state
+            city = None
+            
+            location_match = re.search(r'(.*?),\s+([A-Z]{2})$', location)
+            if location_match:
+                city = location_match.group(1).strip()
+                state = location_match.group(2).strip()
+            
+            # Extract date from date range
+            date_value = None
+            date_match = re.search(r'([A-Za-z]+)\s+(\d{1,2}),?\s+(\d{4})', date_range)
+            date_range_match = re.search(r'([A-Za-z]+)\s+(\d{1,2})\s*-\s*(?:[A-Za-z]+\s+)?(?:\d{1,2})?,\s*(\d{4})', date_range)
+            
+            if date_match:
+                month_name = date_match.group(1)
+                day = date_match.group(2)
+                year = date_match.group(3)
+                
+                # Get month number
+                month = month_map.get(month_name[:3], '01')
+                
+                # Format date
+                date_value = f"{year}-{month}-{day.zfill(2)}"
+            elif date_range_match:
+                month_name = date_range_match.group(1)
+                day = date_range_match.group(2)
+                year = date_range_match.group(3)
+                
+                # Get month number
+                month = month_map.get(month_name[:3], '01')
+                
+                # Format date
+                date_value = f"{year}-{month}-{day.zfill(2)}"
+            else:
+                # Try other date patterns
+                simple_date_match = re.search(r'([A-Za-z]+)\s+(\d{1,2})', date_range)
+                if simple_date_match:
+                    month_name = simple_date_match.group(1)
+                    day = simple_date_match.group(2)
+                    
+                    # Get month number
+                    month = month_map.get(month_name[:3], '01')
+                    
+                    # Use default year
+                    date_value = f"{default_year}-{month}-{day.zfill(2)}"
+            
+            if date_value:
+                # Determine category and gender
+                name_lower = tournament_name.lower()
+                category = "Men's"  # Default
+                gender = "Men's"    # Default
+                
+                # Category detection
+                if "mid-amateur" in name_lower or "mid amateur" in name_lower:
+                    category = "Mid-Amateur"
+                elif "match play" in name_lower:
+                    category = "Match Play"
+                elif "senior" in name_lower and "super" not in name_lower and "women" not in name_lower:
+                    category = "Seniors"
+                elif "super senior" in name_lower or "super-senior" in name_lower:
+                    category = "Super Senior"
+                elif "junior" in name_lower and "girls" not in name_lower and "boys" not in name_lower:
+                    category = "Junior's"
+                elif "junior girls" in name_lower or "girls junior" in name_lower or "girls'" in name_lower:
+                    category = "Junior's"
+                    gender = "Women's"
+                elif "junior boys" in name_lower or "boys junior" in name_lower or "boys'" in name_lower:
+                    category = "Junior's"
+                elif "amateur" in name_lower and "mid-amateur" not in name_lower:
+                    category = "Amateur"
+                elif "open" in name_lower:
+                    category = "Open"
+                elif "four-ball" in name_lower:
+                    category = "Four-Ball"
+                elif "father-son" in name_lower or "parent-child" in name_lower:
+                    category = "Mixed Family"
+                    gender = "Mixed"
+                elif "women" in name_lower or "ladies" in name_lower:
+                    category = "Women's"
+                    gender = "Women's"
+                
+                # Create tournament entry
+                tournament = {
+                    "Date": date_value,
+                    "Name": tournament_name,
+                    "Course": course1,
+                    "Category": category,
+                    "Gender": gender,
+                    "City": city,
+                    "State": state,
+                    "Zip": None
+                }
+                
+                tournaments.append(tournament)
+                # Only print for the first few tournaments to avoid flooding the output
+                if len(tournaments) <= 10 or len(tournaments) % 10 == 0:
+                    st.write(f"✓ Added tournament #{len(tournaments)} (5-line): {tournament_name}")
+    
+    # If not the repeated course format or no tournaments found, try other formats
+    if not is_repeated_course_format or not tournaments:
+        # Check for other formats and detect which one is most likely
+        format_type = None
         
-        # If still not determined, check more specifically
+        # Check if this is course-first format
+        # In this format, every 4th line (i+3) is a date, and the 3rd line (i+2) is a location
+        course_first_format = False
+        if len(lines) >= 8 and len(lines) % 4 == 0:  # Need at least 2 blocks of 4
+            course_first_count = 0
+            for i in range(0, len(lines), 4):
+                if (i+3 < len(lines) and 
+                    re.search(r'(January|February|March|April|May|June|July|August|September|October|November|December|Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d{1,2}', lines[i+3]) and
+                    re.search(r'(.*?),\s+([A-Z]{2})$', lines[i+2])):
+                    course_first_count += 1
+            
+            if course_first_count >= len(lines) // 8:  # At least 1/2 of potential blocks match
+                format_type = "4-line-course-first"
+                st.write(f"Detected 4-line course-first format with {course_first_count} matches")
+        
+        # Check if this is standard 4-line format
+        # In this format, every 4th line (i+3) is a date, 1st line is tournament name, 3rd line has location
+        standard_4line_format = False
+        if len(lines) >= 8 and len(lines) % 4 == 0 and not format_type:  # Need at least 2 blocks of 4
+            standard_4line_count = 0
+            for i in range(0, len(lines), 4):
+                if (i+3 < len(lines) and i+2 < len(lines) and
+                    re.search(r'(January|February|March|April|May|June|July|August|September|October|November|December|Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d{1,2}', lines[i+3]) and
+                    re.search(r'(.*?),\s+([A-Z]{2})$', lines[i+2])):
+                    standard_4line_count += 1
+            
+            if standard_4line_count >= len(lines) // 8:  # At least 1/2 of potential blocks match
+                format_type = "4-line"
+                st.write(f"Detected standard 4-line format with {standard_4line_count} matches")
+        
+        # Check if this is 3-line format
+        # In this format, every 3rd line (i+2) is a date
+        three_line_format = False
+        if len(lines) >= 6 and len(lines) % 3 == 0 and not format_type:  # Need at least 2 blocks of 3
+            three_line_count = 0
+            for i in range(0, len(lines), 3):
+                if (i+2 < len(lines) and
+                    re.search(r'(January|February|March|April|May|June|July|August|September|October|November|December|Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d{1,2}', lines[i+2])):
+                    three_line_count += 1
+            
+            if three_line_count >= len(lines) // 6:  # At least 1/2 of potential blocks match
+                format_type = "3-line"
+                st.write(f"Detected 3-line format with {three_line_count} matches")
+        
+        # If no specific format detected, choose based on line count
         if not format_type:
-            # Default to most likely format based on line count and patterns
-            if len(lines) % 4 == 0 and location_count >= len(lines) // 8:
-                format_type = "4-line-course-first"  # Most complex format, try first
-                st.write("Defaulting to 4-line course-first format based on line count and location patterns")
-            elif len(lines) % 3 == 0:
+            if len(lines) % 3 == 0:
                 format_type = "3-line"
                 st.write("Defaulting to 3-line format based on line count")
             elif len(lines) % 4 == 0:
                 format_type = "4-line"
                 st.write("Defaulting to 4-line format based on line count")
-            elif len(lines) % 5 == 0:
-                format_type = "5-line"
-                st.write("Defaulting to 5-line format based on line count")
             else:
                 # Choose the format with the least remainder
                 remainders = {
                     "3-line": len(lines) % 3,
-                    "4-line": len(lines) % 4,
-                    "5-line": len(lines) % 5
+                    "4-line": len(lines) % 4
                 }
                 min_remainder = min(remainders.values())
                 for fmt, rem in remainders.items():
@@ -890,31 +1007,17 @@ def parse_amateur_golf_format_improved(text, default_year="2025", default_state=
                         format_type = fmt
                         st.write(f"Defaulting to {fmt} format based on minimal remainder")
                         break
-    
-    # Process according to detected format
-    if format_type == "5-line":
-        # Process in chunks of 5 lines (Course-Tournament-Course-Location-Date)
-        i = 0
-        while i <= len(lines) - 5:
-            course1 = lines[i]
-            tournament_name = lines[i+1]
-            course2 = lines[i+2]
-            location = lines[i+3]
-            date_range = lines[i+4]
-            
-            # Verify courses match or are similar
-            courses_match = False
-            if course1 == course2:
-                courses_match = True
-            elif len(course1) > 5 and len(course2) > 5 and (course1 in course2 or course2 in course1):
-                courses_match = True
-            else:
-                # Check for common golf terms
-                common_terms = ["Country Club", "Golf Club", "Golf Course", "GC", "CC"]
-                if any(term in course1 and term in course2 for term in common_terms):
-                    courses_match = True
-            
-            if courses_match:
+        
+        # Process according to detected format
+        if format_type == "4-line-course-first":
+            # Process in chunks of 4 lines (Course-Tournament-Location-Date)
+            i = 0
+            while i <= len(lines) - 4:
+                course_name = lines[i]
+                tournament_name = lines[i+1]
+                location = lines[i+2]
+                date_range = lines[i+3]
+                
                 # Extract city and state from location
                 location_match = re.search(r'(.*?),\s+([A-Z]{2})$', location)
                 city = None
@@ -947,9 +1050,9 @@ def parse_amateur_golf_format_improved(text, default_year="2025", default_state=
                         category = "Mid-Amateur"
                     elif "match play" in name_lower:
                         category = "Match Play"
-                    elif "senior" in name_lower and "super" not in name_lower:
+                    elif "senior" in name_lower and "super" not in name_lower and "women" not in name_lower:
                         category = "Seniors"
-                    elif "super senior" in name_lower:
+                    elif "super senior" in name_lower or "super-senior" in name_lower:
                         category = "Super Senior"
                     elif "junior" in name_lower and "girls" not in name_lower and "boys" not in name_lower:
                         category = "Junior's"
@@ -960,7 +1063,7 @@ def parse_amateur_golf_format_improved(text, default_year="2025", default_state=
                         category = "Junior's"
                     elif "amateur" in name_lower and "mid-amateur" not in name_lower:
                         category = "Amateur"
-                    elif "open" in name_lower:
+                    elif "open" in name_lower and "championship" in name_lower:
                         category = "Open"
                     elif "four-ball" in name_lower:
                         category = "Four-Ball"
@@ -978,12 +1081,19 @@ def parse_amateur_golf_format_improved(text, default_year="2025", default_state=
                         gender = "Women's"
                     elif "public links" in name_lower:
                         category = "Public Links"
+                    elif "stroke play" in name_lower:
+                        category = "Stroke Play"
+                    elif "pga" in name_lower and not any(x in name_lower for x in ["women", "ladies", "girls"]):
+                        category = "Professional"
+                    elif "lpga" in name_lower:
+                        category = "Professional"
+                        gender = "Women's"
                     
                     # Create tournament entry
                     tournament = {
                         "Date": date_value,
                         "Name": tournament_name,
-                        "Course": course1,
+                        "Course": course_name,
                         "Category": category,
                         "Gender": gender,
                         "City": city,
@@ -994,322 +1104,222 @@ def parse_amateur_golf_format_improved(text, default_year="2025", default_state=
                     tournaments.append(tournament)
                     # Only print for the first few tournaments to avoid flooding the output
                     if len(tournaments) <= 10 or len(tournaments) % 10 == 0:
-                        st.write(f"✓ Added tournament #{len(tournaments)} (5-line): {tournament_name}")
-            
-            # Move to next block of 5 lines
-            i += 5
-    
-    elif format_type == "4-line-course-first":
-        # Process in chunks of 4 lines (Course-Tournament-Location-Date)
-        i = 0
-        while i <= len(lines) - 4:
-            course_name = lines[i]
-            tournament_name = lines[i+1]
-            location = lines[i+2]
-            date_range = lines[i+3]
-            
-            # Extract city and state from location
-            location_match = re.search(r'(.*?),\s+([A-Z]{2})$', location)
-            city = None
-            state = default_state
-            
-            if location_match:
-                city = location_match.group(1).strip()
-                state = location_match.group(2).strip()
+                        st.write(f"✓ Added tournament #{len(tournaments)} (4-line-course-first): {tournament_name}")
                 
-            # Extract date from date range
-            date_match = re.search(r'([A-Za-z]+)\s+(\d{1,2}),?\s+(\d{4})', date_range)
-            if date_match:
-                month_name = date_match.group(1)
-                day = date_match.group(2)
-                year = date_match.group(3)
-                
-                # Get month number
-                month = month_map.get(month_name[:3], '01')
-                
-                # Format date
-                date_value = f"{year}-{month}-{day.zfill(2)}"
-                
-                # Determine category and gender
-                name_lower = tournament_name.lower()
-                category = "Men's"  # Default
-                gender = "Men's"    # Default
-                
-                # Category detection
-                if "mid-amateur" in name_lower or "mid-amateur" in name_lower:
-                    category = "Mid-Amateur"
-                elif "match play" in name_lower:
-                    category = "Match Play"
-                elif "senior" in name_lower and "super" not in name_lower and "women" not in name_lower:
-                    category = "Seniors"
-                elif "super senior" in name_lower or "super-senior" in name_lower:
-                    category = "Super Senior"
-                elif "junior" in name_lower and "girls" not in name_lower and "boys" not in name_lower:
-                    category = "Junior's"
-                elif "junior girls" in name_lower or "girls junior" in name_lower or "girls'" in name_lower:
-                    category = "Junior's"
-                    gender = "Women's"
-                elif "junior boys" in name_lower or "boys junior" in name_lower or "boys'" in name_lower:
-                    category = "Junior's"
-                elif "amateur" in name_lower and "mid-amateur" not in name_lower:
-                    category = "Amateur"
-                elif "open" in name_lower and "championship" in name_lower:
-                    category = "Open"
-                elif "four-ball" in name_lower:
-                    category = "Four-Ball"
-                elif "better ball" in name_lower:
-                    category = "Better Ball"
-                elif "father" in name_lower and "son" in name_lower:
-                    category = "Father & Son"
-                elif "parent" in name_lower and "child" in name_lower:
-                    category = "Parent & Child"
-                elif "mixed" in name_lower or "pinehurst" in name_lower:
-                    category = "Mixed/Couples"
-                    gender = "Mixed"
-                elif "women" in name_lower or "ladies" in name_lower:
-                    category = "Women's"
-                    gender = "Women's"
-                elif "public links" in name_lower:
-                    category = "Public Links"
-                elif "stroke play" in name_lower:
-                    category = "Stroke Play"
-                elif "pga" in name_lower and not any(x in name_lower for x in ["women", "ladies", "girls"]):
-                    category = "Professional"
-                elif "lpga" in name_lower:
-                    category = "Professional"
-                    gender = "Women's"
-                
-                # Create tournament entry
-                tournament = {
-                    "Date": date_value,
-                    "Name": tournament_name,
-                    "Course": course_name,
-                    "Category": category,
-                    "Gender": gender,
-                    "City": city,
-                    "State": state,
-                    "Zip": None
-                }
-                
-                tournaments.append(tournament)
-                # Only print for the first few tournaments to avoid flooding the output
-                if len(tournaments) <= 10 or len(tournaments) % 10 == 0:
-                    st.write(f"✓ Added tournament #{len(tournaments)} (4-line-course-first): {tournament_name}")
-            
-            # Move to next block of 4 lines
-            i += 4
-    
-    elif format_type == "4-line":
-        # Process in chunks of 4 lines (Tournament-Course-Location-Date)
-        i = 0
-        while i <= len(lines) - 4:
-            tournament_name = lines[i]
-            course_name = lines[i+1]
-            location = lines[i+2]
-            date_range = lines[i+3]
-            
-            # Extract city and state from location
-            location_match = re.search(r'(.*?),\s+([A-Z]{2})$', location)
-            city = None
-            state = default_state
-            
-            if location_match:
-                city = location_match.group(1).strip()
-                state = location_match.group(2).strip()
-                
-            # Extract date from date range
-            date_match = re.search(r'([A-Za-z]+)\s+(\d{1,2}),?\s+(\d{4})', date_range)
-            if date_match:
-                month_name = date_match.group(1)
-                day = date_match.group(2)
-                year = date_match.group(3)
-                
-                # Get month number
-                month = month_map.get(month_name[:3], '01')
-                
-                # Format date
-                date_value = f"{year}-{month}-{day.zfill(2)}"
-                
-                # Determine category and gender
-                name_lower = tournament_name.lower()
-                category = "Men's"  # Default
-                gender = "Men's"    # Default
-                
-                # Category detection
-                if "mid-amateur" in name_lower or "mid-amateur" in name_lower:
-                    category = "Mid-Amateur"
-                elif "match play" in name_lower:
-                    category = "Match Play"
-                elif "senior" in name_lower and "super" not in name_lower and "women" not in name_lower:
-                    category = "Seniors"
-                elif "super senior" in name_lower or "super-senior" in name_lower:
-                    category = "Super Senior"
-                elif "junior" in name_lower and "girls" not in name_lower and "boys" not in name_lower:
-                    category = "Junior's"
-                elif "junior girls" in name_lower or "girls junior" in name_lower or "girls'" in name_lower:
-                    category = "Junior's"
-                    gender = "Women's"
-                elif "junior boys" in name_lower or "boys junior" in name_lower or "boys'" in name_lower:
-                    category = "Junior's"
-                elif "amateur" in name_lower and "mid-amateur" not in name_lower:
-                    category = "Amateur"
-                elif "open" in name_lower and "championship" in name_lower:
-                    category = "Open"
-                elif "four-ball" in name_lower:
-                    category = "Four-Ball"
-                elif "better ball" in name_lower:
-                    category = "Better Ball"
-                elif "father" in name_lower and "son" in name_lower:
-                    category = "Father & Son"
-                elif "parent" in name_lower and "child" in name_lower:
-                    category = "Parent & Child"
-                elif "mixed" in name_lower or "pinehurst" in name_lower:
-                    category = "Mixed/Couples"
-                    gender = "Mixed"
-                elif "women" in name_lower or "ladies" in name_lower:
-                    category = "Women's"
-                    gender = "Women's"
-                elif "public links" in name_lower:
-                    category = "Public Links"
-                elif "stroke play" in name_lower:
-                    category = "Stroke Play"
-                elif "pga" in name_lower and not any(x in name_lower for x in ["women", "ladies", "girls"]):
-                    category = "Professional"
-                elif "lpga" in name_lower:
-                    category = "Professional"
-                    gender = "Women's"
-                
-                # Create tournament entry
-                tournament = {
-                    "Date": date_value,
-                    "Name": tournament_name,
-                    "Course": course_name,
-                    "Category": category,
-                    "Gender": gender,
-                    "City": city,
-                    "State": state,
-                    "Zip": None
-                }
-                
-                tournaments.append(tournament)
-                # Only print for the first few tournaments to avoid flooding the output
-                if len(tournaments) <= 10 or len(tournaments) % 10 == 0:
-                    st.write(f"✓ Added tournament #{len(tournaments)} (4-line): {tournament_name}")
+                # Move to next block of 4 lines
+                i += 4
         
-            # Move to next block of 4 lines
-            i += 4
-    
-    else:  # 3-line format
-        # Process in chunks of 3 lines (Tournament-Course-Date)
-        i = 0
-        while i <= len(lines) - 3:
-            tournament_name = lines[i]
-            course_name = lines[i+1]
-            date_range = lines[i+2]
-            
-            # Extract date from date range
-            date_match = re.search(r'([A-Za-z]+)\s+(\d{1,2})(?:\s*-\s*\d{1,2})?,\s+(\d{4})', date_range)
-            date_match2 = re.search(r'([A-Za-z]+)\s+(\d{1,2})\s*-\s*\d+,\s*(\d{4})', date_range)
-            date_match3 = re.search(r'([A-Za-z]+)\s+(\d{1,2})', date_range)
-            
-            date_value = None
-            
-            if date_match:
-                month_name = date_match.group(1)
-                day = date_match.group(2)
-                year = date_match.group(3)
+        elif format_type == "4-line":
+            # Process in chunks of 4 lines (Tournament-Course-Location-Date)
+            i = 0
+            while i <= len(lines) - 4:
+                tournament_name = lines[i]
+                course_name = lines[i+1]
+                location = lines[i+2]
+                date_range = lines[i+3]
                 
-                # Get month number
-                month = month_map.get(month_name[:3], '01')
+                # Extract city and state from location
+                location_match = re.search(r'(.*?),\s+([A-Z]{2})$', location)
+                city = None
+                state = default_state
                 
-                # Format date
-                date_value = f"{year}-{month}-{day.zfill(2)}"
-            elif date_match2:
-                month_name = date_match2.group(1)
-                day = date_match2.group(2)
-                year = date_match2.group(3)
-                
-                # Get month number
-                month = month_map.get(month_name[:3], '01')
-                
-                # Format date
-                date_value = f"{year}-{month}-{day.zfill(2)}"
-            elif date_match3:
-                month_name = date_match3.group(1)
-                day = date_match3.group(2)
-                
-                # Get month number
-                month = month_map.get(month_name[:3], '01')
-                
-                # Use default year if not specified
-                date_value = f"{default_year}-{month}-{day.zfill(2)}"
-            
-            if date_value:
-                # Determine category and gender from tournament name
-                name_lower = tournament_name.lower()
-                category = "Men's"  # Default
-                gender = "Men's"    # Default
-                
-                # Extract year prefix if present (e.g., "2025 NYS Women's Amateur")
-                year_prefix_match = re.match(r'^\d{4}\s+', tournament_name)
-                clean_name = tournament_name
-                if year_prefix_match:
-                    clean_name = tournament_name[year_prefix_match.end():].strip()
+                if location_match:
+                    city = location_match.group(1).strip()
+                    state = location_match.group(2).strip()
                     
-                name_lower = clean_name.lower()
-                
-                # Category detection
-                if "mid-amateur" in name_lower:
-                    category = "Mid-Amateur"
-                elif "match play" in name_lower:
-                    category = "Match Play"
-                elif ("senior" in name_lower or "super senior" in name_lower) and "women" not in name_lower:
-                    if "super" in name_lower:
-                        category = "Super Senior"
-                    else:
+                # Extract date from date range
+                date_match = re.search(r'([A-Za-z]+)\s+(\d{1,2}),?\s+(\d{4})', date_range)
+                if date_match:
+                    month_name = date_match.group(1)
+                    day = date_match.group(2)
+                    year = date_match.group(3)
+                    
+                    # Get month number
+                    month = month_map.get(month_name[:3], '01')
+                    
+                    # Format date
+                    date_value = f"{year}-{month}-{day.zfill(2)}"
+                    
+                    # Determine category and gender
+                    name_lower = tournament_name.lower()
+                    category = "Men's"  # Default
+                    gender = "Men's"    # Default
+                    
+                    # Category detection
+                    if "mid-amateur" in name_lower or "mid-amateur" in name_lower:
+                        category = "Mid-Amateur"
+                    elif "match play" in name_lower:
+                        category = "Match Play"
+                    elif "senior" in name_lower and "super" not in name_lower and "women" not in name_lower:
                         category = "Seniors"
-                elif "boys" in name_lower and "girls" in name_lower:
-                    category = "Junior's"
-                    gender = "Mixed"
-                elif "junior" in name_lower and "girls" not in name_lower and "boys" not in name_lower:
-                    category = "Junior's"
-                elif "girls" in name_lower or "girls'" in name_lower:
-                    category = "Junior's"
-                    gender = "Women's"
-                elif "boys" in name_lower or "boys'" in name_lower:
-                    category = "Junior's"
-                elif "amateur" in name_lower and "mid-amateur" not in name_lower:
-                    category = "Amateur"
-                elif "open" in name_lower:
-                    category = "Open"
-                elif "four-ball" in name_lower:
-                    category = "Four-Ball"
-                elif "mixed" in name_lower:
-                    category = "Mixed/Couples"
-                    gender = "Mixed"
-                elif "women" in name_lower or "ladies" in name_lower:
-                    category = "Women's" 
-                    gender = "Women's"
-                
-                # Create tournament entry
-                tournament = {
-                    "Date": date_value,
-                    "Name": clean_name,  # Use name without year prefix
-                    "Course": course_name,
-                    "Category": category,
-                    "Gender": gender,
-                    "City": None,  # No city info in 3-line format
-                    "State": default_state,
-                    "Zip": None
-                }
-                
-                tournaments.append(tournament)
-                # Only print for the first few tournaments to avoid flooding the output
-                if len(tournaments) <= 10 or len(tournaments) % 10 == 0:
-                    st.write(f"✓ Added tournament #{len(tournaments)} (3-line): {clean_name}")
+                    elif "super senior" in name_lower or "super-senior" in name_lower:
+                        category = "Super Senior"
+                    elif "junior" in name_lower and "girls" not in name_lower and "boys" not in name_lower:
+                        category = "Junior's"
+                    elif "junior girls" in name_lower or "girls junior" in name_lower or "girls'" in name_lower:
+                        category = "Junior's"
+                        gender = "Women's"
+                    elif "junior boys" in name_lower or "boys junior" in name_lower or "boys'" in name_lower:
+                        category = "Junior's"
+                    elif "amateur" in name_lower and "mid-amateur" not in name_lower:
+                        category = "Amateur"
+                    elif "open" in name_lower and "championship" in name_lower:
+                        category = "Open"
+                    elif "four-ball" in name_lower:
+                        category = "Four-Ball"
+                    elif "better ball" in name_lower:
+                        category = "Better Ball"
+                    elif "father" in name_lower and "son" in name_lower:
+                        category = "Father & Son"
+                    elif "parent" in name_lower and "child" in name_lower:
+                        category = "Parent & Child"
+                    elif "mixed" in name_lower or "pinehurst" in name_lower:
+                        category = "Mixed/Couples"
+                        gender = "Mixed"
+                    elif "women" in name_lower or "ladies" in name_lower:
+                        category = "Women's"
+                        gender = "Women's"
+                    elif "public links" in name_lower:
+                        category = "Public Links"
+                    elif "stroke play" in name_lower:
+                        category = "Stroke Play"
+                    elif "pga" in name_lower and not any(x in name_lower for x in ["women", "ladies", "girls"]):
+                        category = "Professional"
+                    elif "lpga" in name_lower:
+                        category = "Professional"
+                        gender = "Women's"
+                    
+                    # Create tournament entry
+                    tournament = {
+                        "Date": date_value,
+                        "Name": tournament_name,
+                        "Course": course_name,
+                        "Category": category,
+                        "Gender": gender,
+                        "City": city,
+                        "State": state,
+                        "Zip": None
+                    }
+                    
+                    tournaments.append(tournament)
+                    # Only print for the first few tournaments to avoid flooding the output
+                    if len(tournaments) <= 10 or len(tournaments) % 10 == 0:
+                        st.write(f"✓ Added tournament #{len(tournaments)} (4-line): {tournament_name}")
             
-            # Move to next block of 3 lines
-            i += 3
+                # Move to next block of 4 lines
+                i += 4
+        
+        elif format_type == "3-line":
+            # Process in chunks of 3 lines (Tournament-Course-Date)
+            i = 0
+            while i <= len(lines) - 3:
+                tournament_name = lines[i]
+                course_name = lines[i+1]
+                date_range = lines[i+2]
+                
+                # Extract date from date range
+                date_match = re.search(r'([A-Za-z]+)\s+(\d{1,2})(?:\s*-\s*\d{1,2})?,\s+(\d{4})', date_range)
+                date_match2 = re.search(r'([A-Za-z]+)\s+(\d{1,2})\s*-\s*\d+,\s*(\d{4})', date_range)
+                date_match3 = re.search(r'([A-Za-z]+)\s+(\d{1,2})', date_range)
+                
+                date_value = None
+                
+                if date_match:
+                    month_name = date_match.group(1)
+                    day = date_match.group(2)
+                    year = date_match.group(3)
+                    
+                    # Get month number
+                    month = month_map.get(month_name[:3], '01')
+                    
+                    # Format date
+                    date_value = f"{year}-{month}-{day.zfill(2)}"
+                elif date_match2:
+                    month_name = date_match2.group(1)
+                    day = date_match2.group(2)
+                    year = date_match2.group(3)
+                    
+                    # Get month number
+                    month = month_map.get(month_name[:3], '01')
+                    
+                    # Format date
+                    date_value = f"{year}-{month}-{day.zfill(2)}"
+                elif date_match3:
+                    month_name = date_match3.group(1)
+                    day = date_match3.group(2)
+                    
+                    # Get month number
+                    month = month_map.get(month_name[:3], '01')
+                    
+                    # Use default year if not specified
+                    date_value = f"{default_year}-{month}-{day.zfill(2)}"
+                
+                if date_value:
+                    # Determine category and gender from tournament name
+                    name_lower = tournament_name.lower()
+                    category = "Men's"  # Default
+                    gender = "Men's"    # Default
+                    
+                    # Extract year prefix if present (e.g., "2025 NYS Women's Amateur")
+                    year_prefix_match = re.match(r'^\d{4}\s+', tournament_name)
+                    clean_name = tournament_name
+                    if year_prefix_match:
+                        clean_name = tournament_name[year_prefix_match.end():].strip()
+                        
+                    name_lower = clean_name.lower()
+                    
+                    # Category detection
+                    if "mid-amateur" in name_lower:
+                        category = "Mid-Amateur"
+                    elif "match play" in name_lower:
+                        category = "Match Play"
+                    elif ("senior" in name_lower or "super senior" in name_lower) and "women" not in name_lower:
+                        if "super" in name_lower:
+                            category = "Super Senior"
+                        else:
+                            category = "Seniors"
+                    elif "boys" in name_lower and "girls" in name_lower:
+                        category = "Junior's"
+                        gender = "Mixed"
+                    elif "junior" in name_lower and "girls" not in name_lower and "boys" not in name_lower:
+                        category = "Junior's"
+                    elif "girls" in name_lower or "girls'" in name_lower:
+                        category = "Junior's"
+                        gender = "Women's"
+                    elif "boys" in name_lower or "boys'" in name_lower:
+                        category = "Junior's"
+                    elif "amateur" in name_lower and "mid-amateur" not in name_lower:
+                        category = "Amateur"
+                    elif "open" in name_lower:
+                        category = "Open"
+                    elif "four-ball" in name_lower:
+                        category = "Four-Ball"
+                    elif "mixed" in name_lower:
+                        category = "Mixed/Couples"
+                        gender = "Mixed"
+                    elif "women" in name_lower or "ladies" in name_lower:
+                        category = "Women's" 
+                        gender = "Women's"
+                    
+                    # Create tournament entry
+                    tournament = {
+                        "Date": date_value,
+                        "Name": clean_name,  # Use name without year prefix
+                        "Course": course_name,
+                        "Category": category,
+                        "Gender": gender,
+                        "City": None,  # No city info in 3-line format
+                        "State": default_state,
+                        "Zip": None
+                    }
+                    
+                    tournaments.append(tournament)
+                    # Only print for the first few tournaments to avoid flooding the output
+                    if len(tournaments) <= 10 or len(tournaments) % 10 == 0:
+                        st.write(f"✓ Added tournament #{len(tournaments)} (3-line): {clean_name}")
+                
+                # Move to next block of 3 lines
+                i += 3
     
     # Convert to DataFrame - with specific column ordering
     if tournaments:
@@ -1328,7 +1338,222 @@ def parse_amateur_golf_format_improved(text, default_year="2025", default_state=
         # Return empty DataFrame with required columns
         st.write("Amateur Golf parser: No tournaments found")
         return pd.DataFrame(columns=["Date", "Name", "Course", "Category", "Gender", "City", "State", "Zip"])
+
+def parse_golf_genius_format(text, default_year="2025", default_state=None):
+    """
+    Specialized parser for Golf Genius schedule format.
     
+    Format:
+    Tournament Name
+    View
+    Date
+    Course Name
+    Status Lines (OPEN/OPENS/CLOSED)
+    Date/Time information
+    ...
+    
+    Handles unlimited number of tournaments with no character or row limitations.
+    
+    Arguments:
+    text -- The raw tournament text
+    default_year -- Default year to use if not specified in text
+    default_state -- Default state to use if not specified in text
+    
+    Returns:
+    DataFrame with parsed tournament data
+    """
+    import re
+    import pandas as pd
+    
+    # Process text into lines
+    lines = [line.strip() for line in text.split('\n') if line.strip()]
+    
+    # Month mapping
+    month_map = {
+        'JAN': '01', 'FEB': '02', 'MAR': '03', 'APR': '04', 
+        'MAY': '05', 'JUN': '06', 'JUL': '07', 'AUG': '08',
+        'SEP': '09', 'OCT': '10', 'NOV': '11', 'DEC': '12',
+        'Jan': '01', 'Feb': '02', 'Mar': '03', 'Apr': '04', 
+        'May': '05', 'Jun': '06', 'Jul': '07', 'Aug': '08',
+        'Sep': '09', 'Oct': '10', 'Nov': '11', 'Dec': '12',
+        'January': '01', 'February': '02', 'March': '03', 'April': '04', 
+        'May': '05', 'June': '06', 'July': '07', 'August': '08',
+        'September': '09', 'October': '10', 'November': '11', 'December': '12'
+    }
+    
+    tournaments = []
+    
+    # Debug output
+    st.write(f"Golf Genius format parser: Processing {len(lines)} lines")
+    
+    # Process the lines to find tournaments
+    i = 0
+    while i < len(lines):
+        if i + 2 < len(lines) and lines[i+1] == "View":
+            # Found a tournament entry
+            tournament_name = lines[i]
+            # The date line is after "View"
+            date_line = lines[i+2]
+            # The course name is after the date
+            course_name = lines[i+3] if i+3 < len(lines) else None
+            
+            # Skip to next tournament
+            next_tournament_idx = len(lines)
+            for j in range(i+4, len(lines)):
+                if j+1 < len(lines) and lines[j+1] == "View":
+                    next_tournament_idx = j
+                    break
+            
+            # Extract date from date line
+            date_value = None
+            
+            # Handle various date formats
+            # Single day format: Mon, Jun 2, 2025
+            date_match = re.search(r'(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun),\s+([A-Za-z]+)\s+(\d{1,2}),\s+(\d{4})', date_line)
+            
+            # Date range format: Sat, Sep 13 - Sun, Sep 14, 2025
+            date_range_match = re.search(r'(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun),\s+([A-Za-z]+)\s+(\d{1,2})\s+-\s+(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun),\s+(?:[A-Za-z]+)\s+(?:\d{1,2}),\s+(\d{4})', date_line)
+            
+            # Next round format: Next Round: Sat, Sep 13, 2025
+            next_round_match = re.search(r'Next Round:\s+(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun),\s+([A-Za-z]+)\s+(\d{1,2}),\s+(\d{4})', date_line)
+            
+            if date_match:
+                month_name = date_match.group(1)
+                day = date_match.group(2)
+                year = date_match.group(3)
+                
+                # Get month number
+                month = month_map.get(month_name, '01')
+                
+                # Format date
+                date_value = f"{year}-{month}-{day.zfill(2)}"
+            elif date_range_match:
+                month_name = date_range_match.group(1)
+                day = date_range_match.group(2)
+                year = date_range_match.group(3)
+                
+                # Get month number
+                month = month_map.get(month_name, '01')
+                
+                # Format date (use first date of range)
+                date_value = f"{year}-{month}-{day.zfill(2)}"
+            elif next_round_match:
+                # For "Next Round" format, check if there's a date line before it
+                if i+1 < len(lines):
+                    prev_date_line = lines[i+1]
+                    prev_date_match = re.search(r'([A-Za-z]+)\s+(\d{1,2})\s+-\s+([A-Za-z]+)\s+(\d{1,2}),\s+(\d{4})', prev_date_line)
+                    if prev_date_match:
+                        month_name = prev_date_match.group(1)
+                        day = prev_date_match.group(2)
+                        year = prev_date_match.group(5)
+                        
+                        # Get month number
+                        month = month_map.get(month_name, '01')
+                        
+                        # Format date
+                        date_value = f"{year}-{month}-{day.zfill(2)}"
+                    else:
+                        # Use the next round date if no other date found
+                        month_name = next_round_match.group(1)
+                        day = next_round_match.group(2)
+                        year = next_round_match.group(3)
+                        
+                        # Get month number
+                        month = month_map.get(month_name, '01')
+                        
+                        # Format date
+                        date_value = f"{year}-{month}-{day.zfill(2)}"
+            else:
+                # Try other date formats if the above didn't match
+                other_date_match = re.search(r'([A-Za-z]+)\s+(\d{1,2})(?:\s*[-,]\s*\d{1,2})?,\s+(\d{4})', date_line)
+                if other_date_match:
+                    month_name = other_date_match.group(1)
+                    day = other_date_match.group(2)
+                    year = other_date_match.group(3)
+                    
+                    # Get month number
+                    month = month_map.get(month_name, '01')
+                    
+                    # Format date
+                    date_value = f"{year}-{month}-{day.zfill(2)}"
+            
+            if date_value and course_name:
+                # Determine tournament type and format
+                name_lower = tournament_name.lower()
+                category = "Men's"  # Default
+                format_type = "Individual"  # Default
+                
+                # Format detection
+                if "four ball" in name_lower or "four-ball" in name_lower:
+                    format_type = "Four-Ball"
+                elif "individual" in name_lower:
+                    format_type = "Individual"
+                elif "championship" in name_lower and not "four-ball" in name_lower and not "individual" in name_lower:
+                    format_type = "Championship"
+                
+                # Category detection (based on the name or other indicators)
+                if "senior" in name_lower:
+                    category = "Seniors"
+                elif "junior" in name_lower:
+                    category = "Junior's"
+                elif "women" in name_lower or "ladies" in name_lower:
+                    category = "Women's"
+                    gender = "Women's"
+                else:
+                    # Default for these tournaments is Men's
+                    category = "Men's"
+                    gender = "Men's"
+                
+                # Extract any special notes (like *RESCHEDULED* or *Lottery Registration*)
+                notes = None
+                notes_match = re.search(r'\*(.*?)\*', tournament_name)
+                if notes_match:
+                    notes = notes_match.group(1).strip()
+                
+                # Create tournament entry
+                tournament = {
+                    "Date": date_value,
+                    "Name": tournament_name,
+                    "Course": course_name,
+                    "Format": format_type,
+                    "Category": category,
+                    "Gender": "Men's",  # Default for these tournaments
+                    "City": None,  # No city info in this format
+                    "State": default_state,
+                    "Zip": None,
+                    "Notes": notes
+                }
+                
+                tournaments.append(tournament)
+                
+                # Only print for the first few tournaments to avoid flooding the output
+                if len(tournaments) <= 5 or len(tournaments) % 10 == 0:
+                    st.write(f"✓ Added tournament #{len(tournaments)}: {tournament_name}")
+            
+            # Move to next tournament 
+            i = next_tournament_idx
+        else:
+            # Not a tournament start, move to next line
+            i += 1
+    
+    # Convert to DataFrame - with specific column ordering
+    if tournaments:
+        st.write(f"Golf Genius parser: Found {len(tournaments)} tournaments")
+        df = pd.DataFrame(tournaments)
+        
+        # Ensure specific column order, including the new Format column
+        columns = ["Date", "Name", "Course", "Format", "Category", "Gender", "City", "State", "Zip", "Notes"]
+        for col in columns:
+            if col not in df.columns:
+                df[col] = None
+        
+        # Return DataFrame with defined column order
+        return df[columns]
+    else:
+        # Return empty DataFrame with required columns
+        st.write("Golf Genius parser: No tournaments found")
+        return pd.DataFrame(columns=["Date", "Name", "Course", "Category", "Gender", "City", "State", "Zip", "Notes"])
+
 def parse_robust_nnga_tournaments(text, year="2025", default_state=None):
     """
     Robust parser for NNGA tournament format that handles variable line spacing.
@@ -3956,11 +4181,10 @@ def ensure_column_order(df):
 if st.button("Process Tournament Data"):
     if tournament_text:
         try:
-            # Try the improved unlimited Amateur Golf format parser first
-            df = parse_amateur_golf_format_improved(tournament_text, year, default_state)
-            
-            if not df.empty:
-                st.write(f"Successfully parsed {len(df)} tournaments using improved Amateur Golf format parser")
+            # Try to detect Golf Genius format first (has "View" lines and a specific pattern)
+            if "View" in tournament_text and ("OPEN" in tournament_text or "OPENS" in tournament_text or "closes on" in tournament_text):
+                st.write("Detected Golf Genius format - using specialized parser")
+                df = parse_golf_genius_format(tournament_text, year, default_state)
             
             # If that didn't work, try other formats
             elif "View" in tournament_text:
@@ -3975,37 +4199,49 @@ if st.button("Process Tournament Data"):
                     st.write("No specialized NNGA parser found, using standard format detection")
                     df = parse_tournament_text(tournament_text)
             
-            # Check for monthly entries format with month headers
-            elif re.search(r'Entry Deadline:|Entries Closed|Entries Open:', tournament_text):
-                st.write("Detected Monthly-Entries format - using specialized parser")
-                df = parse_monthly_entries_format(tournament_text, year, default_state)
-            
-            # Check for day-month-tournament pattern
-            elif any(line.isdigit() and 1 <= int(line) <= 31 for line in tournament_text.split('\n')):
-                # Split into lines and filter out empty ones
-                lines = [line.strip() for line in tournament_text.split('\n') if line.strip()]
+            # Try the improved unified Amateur Golf format parser
+            elif len(tournament_text.split('\n')) >= 10:  # Need at least 10 lines for pattern detection
+                df = parse_amateur_golf_format_improved(tournament_text, year, default_state)
                 
-                # Count pattern occurrences: day number followed by month name
-                month_names = ['Jan', 'January', 'Feb', 'February', 'Mar', 'March', 
-                             'Apr', 'April', 'May', 'Jun', 'June', 'Jul', 'July', 
-                             'Aug', 'August', 'Sep', 'September', 'Oct', 'October',
-                             'Nov', 'November', 'Dec', 'December']
-                
-                pattern_count = 0
-                for i in range(len(lines) - 1):
-                    if (lines[i].isdigit() and 1 <= int(lines[i]) <= 31 and 
-                        i+1 < len(lines) and lines[i+1] in month_names):
-                        pattern_count += 1
-                
-                if pattern_count >= 2:
-                    st.write("Detected Day-Month-Tournament format - using specialized parser")
-                    df = parse_day_month_tournament_format(tournament_text, year, default_state)
+                if not df.empty:
+                    st.write(f"Successfully parsed {len(df)} tournaments using improved Amateur Golf format parser")
+                # If Amateur Golf parser didn't work, try other formats
                 else:
-                    # Fall back to standard format detection
-                    st.write("Using standard format detection")
-                    df = parse_tournament_text(tournament_text)
+                    # Check for monthly entries format with month headers
+                    if re.search(r'Entry Deadline:|Entries Closed|Entries Open:', tournament_text):
+                        st.write("Detected Monthly-Entries format - using specialized parser")
+                        df = parse_monthly_entries_format(tournament_text, year, default_state)
+                    
+                    # Check for day-month-tournament pattern
+                    elif any(line.isdigit() and 1 <= int(line) <= 31 for line in tournament_text.split('\n')):
+                        # Split into lines and filter out empty ones
+                        lines = [line.strip() for line in tournament_text.split('\n') if line.strip()]
+                        
+                        # Count pattern occurrences: day number followed by month name
+                        month_names = ['Jan', 'January', 'Feb', 'February', 'Mar', 'March', 
+                                     'Apr', 'April', 'May', 'Jun', 'June', 'Jul', 'July', 
+                                     'Aug', 'August', 'Sep', 'September', 'Oct', 'October',
+                                     'Nov', 'November', 'Dec', 'December']
+                        
+                        pattern_count = 0
+                        for i in range(len(lines) - 1):
+                            if (lines[i].isdigit() and 1 <= int(lines[i]) <= 31 and 
+                                i+1 < len(lines) and lines[i+1] in month_names):
+                                pattern_count += 1
+                        
+                        if pattern_count >= 2:
+                            st.write("Detected Day-Month-Tournament format - using specialized parser")
+                            df = parse_day_month_tournament_format(tournament_text, year, default_state)
+                        else:
+                            # Fall back to standard format detection
+                            st.write("Using standard format detection")
+                            df = parse_tournament_text(tournament_text)
+                    else:
+                        # For other formats, use the original format detection and parsing
+                        st.write("Using standard format detection")
+                        df = parse_tournament_text(tournament_text)
             else:
-                # For other formats, use the original format detection and parsing
+                # Not enough lines for pattern detection, use standard parsing
                 st.write("Using standard format detection")
                 df = parse_tournament_text(tournament_text)
             
@@ -4041,7 +4277,25 @@ if st.button("Process Tournament Data"):
                     df['Gender'] = df.apply(lambda row: row['Gender'] if pd.notna(row['Gender']) else determine_gender(row['Name']), axis=1)
                 
                 # Ensure columns are in the correct order
-                df = ensure_column_order(df)
+                if 'Format' in df.columns:
+                    # Include Format column if it exists
+                    custom_columns = ["Date", "Name", "Course", "Format", "Category", "Gender", "City", "State", "Zip"]
+                    for col in custom_columns:
+                        if col not in df.columns:
+                            df[col] = None
+                    
+                    # Add any additional required columns
+                    for col in REQUIRED_COLUMNS:
+                        if col not in custom_columns and col not in df.columns:
+                            df[col] = None
+                    
+                    # Set column order
+                    column_order = [col for col in custom_columns if col in df.columns]
+                    extra_columns = [col for col in df.columns if col not in custom_columns]
+                    df = df[column_order + extra_columns]
+                else:
+                    # Use standard column order
+                    df = ensure_column_order(df)
             
             # Display how many tournaments were found
             st.success(f"Successfully extracted {len(df)} tournaments!")
@@ -4049,9 +4303,9 @@ if st.button("Process Tournament Data"):
             # Display the DataFrame with pagination controls for large datasets
             if len(df) > 20:
                 st.write("### Processed Tournament Data (Paginated)")
-                page_size = st.selectbox("Rows per page:", [10, 20, 50, 100], index=1)
+                page_size = st.selectbox("Rows per page:", [10, 20, 50, 100, 500, 1000], index=3)
                 total_pages = (len(df) + page_size - 1) // page_size
-                page = st.number_input("Page:", min_value=1, max_value=total_pages, value=1)
+                page = st.number_input("Page:", min_value=1, max_value=max(1, total_pages), value=1)
                 
                 start_idx = (page - 1) * page_size
                 end_idx = min(start_idx + page_size, len(df))
@@ -4065,9 +4319,9 @@ if st.button("Process Tournament Data"):
             
             # Also show the raw data in table format to ensure all rows are visible
             with st.expander("Show full data table view"):
-                max_rows = min(300, len(df))  # Show up to 300 rows max
+                max_rows = min(1000, len(df))  # Show up to 1000 rows max
                 st.write(f"Showing first {max_rows} rows of {len(df)} total tournaments")
-                st.table(df.head(max_rows))
+                st.dataframe(df.head(max_rows), height=500)
             
             # Create download buttons for the data
             csv = df.to_csv(index=False)
