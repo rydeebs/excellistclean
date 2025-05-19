@@ -789,11 +789,7 @@ def parse_amateur_golf_format_improved(text, default_year="2025", default_state=
     st.write(f"Found {total_blocks} potential tournament blocks")
     
     # Process each block of 5 lines
-    for i in range(0, len(lines), 5):
-        # Skip if we don't have a complete block of 5 lines
-        if i + 4 >= len(lines):
-            break
-            
+    for i in range(0, len(lines) - 4, 5):
         try:
             # Extract the 5 lines for this tournament
             course1 = lines[i]
@@ -822,7 +818,8 @@ def parse_amateur_golf_format_improved(text, default_year="2025", default_state=
             # Extract date from date range
             date_value = None
             
-            # Try different date patterns
+            # ENHANCED DATE EXTRACTION: Try multiple patterns and additional fallbacks
+            
             # Pattern 1: "May 28, 2025 - May 28, 2025"
             date_match1 = re.search(r'([A-Za-z]+)\s+(\d{1,2}),\s+(\d{4})', date_range)
             
@@ -831,6 +828,18 @@ def parse_amateur_golf_format_improved(text, default_year="2025", default_state=
             
             # Pattern 3: "May 28 - 29, 2025"
             date_match3 = re.search(r'([A-Za-z]+)\s+(\d{1,2})\s+-\s+\d{1,2},\s+(\d{4})', date_range)
+            
+            # Pattern 4: Just "Month DD, YYYY" anywhere in the string
+            date_match4 = re.search(r'([A-Za-z]+)\s+(\d{1,2}),?\s+(\d{4})', date_range)
+            
+            # Pattern 5: For cases with just month and year (Jun 2025)
+            date_match5 = re.search(r'([A-Za-z]+)\s+(\d{4})$', date_range)
+            
+            # Pattern 6: For "Jul 15, 2025 - Jul 06, 2025" (where end date might be in a different month or earlier)
+            date_match6 = re.search(r'([A-Za-z]+)\s+(\d{1,2}),\s+\d{4}\s+-\s+(?:[A-Za-z]+\s+)?(?:\d{1,2})?,\s+(\d{4})', date_range)
+            
+            # Pattern 7: Look for just any date-like pattern, even in the wrong order
+            date_match7 = re.search(r'(\d{4}).*?([A-Za-z]+).*?(\d{1,2})', date_range)
             
             if date_match1:
                 month_name = date_match1.group(1)
@@ -870,21 +879,156 @@ def parse_amateur_golf_format_improved(text, default_year="2025", default_state=
                 
                 # Format date
                 date_value = f"{year}-{month}-{day.zfill(2)}"
-            else:
-                # Fallback: try a simple extraction
+            elif date_match4:
+                month_name = date_match4.group(1)
+                day = date_match4.group(2)
+                year = date_match4.group(3)
+                
+                # Get month number
+                month = month_map.get(month_name[:3], '01')
+                
+                # Format date
+                date_value = f"{year}-{month}-{day.zfill(2)}"
+            elif date_match5:
+                month_name = date_match5.group(1)
+                year = date_match5.group(2)
+                
+                # Get month number
+                month = month_map.get(month_name[:3], '01')
+                
+                # Use day 1 as default
+                date_value = f"{year}-{month}-01"
+            elif date_match6:
+                month_name = date_match6.group(1)
+                day = date_match6.group(2)
+                year = date_match6.group(3)
+                
+                # Get month number
+                month = month_map.get(month_name[:3], '01')
+                
+                # Format date
+                date_value = f"{year}-{month}-{day.zfill(2)}"
+            elif date_match7:
+                year = date_match7.group(1)
+                month_name = date_match7.group(2)
+                day = date_match7.group(3)
+                
+                # Get month number
+                month = month_map.get(month_name[:3], '01')
+                if month:
+                    date_value = f"{year}-{month}-{day.zfill(2)}"
+            
+            # Additional fallback: check adjacent lines for dates
+            if not date_value and i > 0:
+                # Check the date line again with more relaxed patterns
+                for fallback_line in [date_range, lines[i+1] if i+1 < len(lines) else "", lines[i-1] if i > 0 else ""]:
+                    # Look for any month name in the line
+                    for month_name in month_map.keys():
+                        if month_name in fallback_line:
+                            # Try to extract a day number
+                            day_match = re.search(fr'{month_name}\s+(\d{{1,2}})', fallback_line)
+                            if day_match:
+                                day = day_match.group(1)
+                                # Look for a year
+                                year_match = re.search(r'(\d{4})', fallback_line)
+                                year = year_match.group(1) if year_match else default_year
+                                month = month_map.get(month_name[:3], '01')
+                                date_value = f"{year}-{month}-{day.zfill(2)}"
+                                break
+                    if date_value:
+                        break
+            
+            # One more check: if there's a string that looks like a date in any of the lines
+            if not date_value:
+                # Look for any line that contains months and years
+                for check_line in [date_range, lines[i+1] if i+1 < len(lines) else "", lines[i-1] if i > 0 else ""]:
+                    year_match = re.search(r'(\d{4})', check_line)
+                    if year_match:
+                        year = year_match.group(1)
+                        # Find any month name
+                        for month_name in month_map.keys():
+                            if month_name in check_line:
+                                month = month_map.get(month_name[:3], '01')
+                                # Try to find a day, or default to 01
+                                day_match = re.search(r'\b(\d{1,2})\b', check_line)
+                                day = day_match.group(1) if day_match else "01"
+                                date_value = f"{year}-{month}-{day.zfill(2)}"
+                                break
+                    if date_value:
+                        break
+            
+            # Last resort: use the next or previous block's date
+            if not date_value and len(tournaments) > 0:
+                # Use the date from the previous tournament
+                date_value = tournaments[-1]["Date"]
+                st.write(f"  Using previous tournament's date: {date_value}")
+            elif not date_value and i + 9 < len(lines):  # Check next block
+                # Try to extract date from next block
+                next_date_line = lines[i+9]  # Date would be at i+4+5
                 for month_name in month_map.keys():
-                    if month_name in date_range:
-                        day_match = re.search(fr'{month_name}\s+(\d{{1,2}})', date_range)
+                    if month_name in next_date_line:
+                        # Try to extract a day number
+                        day_match = re.search(fr'{month_name}\s+(\d{{1,2}})', next_date_line)
                         if day_match:
                             day = day_match.group(1)
-                            year_match = re.search(r'(\d{4})', date_range)
+                            # Look for a year
+                            year_match = re.search(r'(\d{4})', next_date_line)
                             year = year_match.group(1) if year_match else default_year
                             month = month_map.get(month_name[:3], '01')
                             date_value = f"{year}-{month}-{day.zfill(2)}"
+                            st.write(f"  Using next block's date: {date_value}")
                             break
             
-            # Only proceed if we have a valid date
-            if date_value:
+            # If we still don't have a date, try one more approach: look for any date in the entire record
+            if not date_value:
+                for j in range(max(0, i-10), min(len(lines), i+15)):
+                    line = lines[j]
+                    year_match = re.search(r'(\d{4})', line)
+                    month_match = None
+                    for month_name in month_map.keys():
+                        if month_name in line:
+                            month_match = month_name
+                            break
+                    
+                    if year_match and month_match:
+                        year = year_match.group(1)
+                        month = month_map.get(month_match[:3], '01')
+                        # Try to find a day, or default to 01
+                        day_match = re.search(r'\b(\d{1,2})\b', line)
+                        day = day_match.group(1) if day_match else "01"
+                        date_value = f"{year}-{month}-{day.zfill(2)}"
+                        st.write(f"  Found date in nearby line {j}: {date_value}")
+                        break
+            
+            # If we still don't have a date, check if the tournament name contains a date
+            if not date_value:
+                # Look for date in tournament name
+                year_match = re.search(r'(\d{4})', tournament_name)
+                month_match = None
+                for month_name in month_map.keys():
+                    if month_name in tournament_name:
+                        month_match = month_name
+                        break
+                
+                if year_match and month_match:
+                    year = year_match.group(1)
+                    month = month_map.get(month_match[:3], '01')
+                    # Try to find a day, or default to 01
+                    day_match = re.search(r'\b(\d{1,2})\b', tournament_name)
+                    day = day_match.group(1) if day_match else "01"
+                    date_value = f"{year}-{month}-{day.zfill(2)}"
+                    st.write(f"  Extracted date from tournament name: {date_value}")
+            
+            # If we STILL don't have a date, use the default year and estimate month/day from position
+            if not date_value:
+                # Estimate month based on position in the file (earlier entries are earlier in the year)
+                estimated_position = i / len(lines)  # 0 to 1
+                estimated_month = max(1, min(12, int(estimated_position * 12) + 1))
+                date_value = f"{default_year}-{str(estimated_month).zfill(2)}-01"
+                st.write(f"  Using estimated date based on position: {date_value}")
+            
+            # Only proceed if we have valid data for a tournament
+            if tournament_name and course1:
                 # Determine category and gender
                 name_lower = tournament_name.lower()
                 
@@ -960,7 +1104,7 @@ def parse_amateur_golf_format_improved(text, default_year="2025", default_state=
                 if len(tournaments) <= 10 or len(tournaments) % 20 == 0:
                     st.write(f"✓ Added tournament: {tournament_name}")
             else:
-                st.write(f"❌ Couldn't extract date from: {date_range}")
+                st.write(f"❌ Skipping incomplete data at block {i//5 + 1}")
         
         except Exception as e:
             st.write(f"❌ Error processing block at index {i}: {str(e)}")
@@ -981,7 +1125,7 @@ def parse_amateur_golf_format_improved(text, default_year="2025", default_state=
         # Return empty DataFrame with required columns
         st.write("Amateur Golf format parser: No tournaments found")
         return pd.DataFrame(columns=["Date", "Name", "Course", "Category", "Gender", "City", "State", "Zip"])
-
+    
 def parse_golf_genius_format(text, default_year="2025", default_state=None):
     """
     Specialized parser for Golf Genius schedule format.
