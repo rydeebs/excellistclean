@@ -737,7 +737,7 @@ def parse_usga_view_format(text):
         # Return empty DataFrame with all required columns
         return pd.DataFrame(columns=REQUIRED_COLUMNS)
     
-def def parse_amateur_golf_format_improved(text, default_year="2025", default_state=None):
+def parse_amateur_golf_format_improved(text, default_year="2025", default_state=None):
     """
     Improved parser for amateur golf tournaments with the 5-line repeating pattern.
     Handles two different formats:
