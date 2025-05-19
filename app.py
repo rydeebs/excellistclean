@@ -739,8 +739,7 @@ def parse_usga_view_format(text):
     
 def parse_amateur_golf_format_improved(text, default_year="2025", default_state=None):
     """
-    Improved parser for amateur golf tournaments with special handling for the 5-line format
-    with repeated course names:
+    Improved parser for amateur golf tournaments with the 5-line repeating pattern:
     
     Line 1: Course Name
     Line 2: Tournament Name
@@ -748,7 +747,7 @@ def parse_amateur_golf_format_improved(text, default_year="2025", default_state=
     Line 4: City, State
     Line 5: Date Range
     
-    Handles unlimited number of tournaments with no row limitations.
+    This format is common across many state golf associations.
     
     Arguments:
     text -- The raw tournament text
@@ -785,49 +784,31 @@ def parse_amateur_golf_format_improved(text, default_year="2025", default_state=
     # Debug output
     st.write(f"Amateur Golf format parser: Processing {len(lines)} lines")
     
-    # First, check if this is the 5-line repeated course format
-    # This is the pattern we're specifically targeting
-    is_repeated_course_format = False
-    if len(lines) >= 10:  # Need at least 2 tournaments to detect
-        # Check for the pattern where every 5th line seems to be a date
-        date_pattern_matches = 0
-        for i in range(4, len(lines), 5):
-            if i < len(lines) and re.search(r'(January|February|March|April|May|June|July|August|September|October|November|December|Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d{1,2}', lines[i]):
-                date_pattern_matches += 1
-        
-        # Check if at least half of the potential date lines match
-        potential_date_lines = (len(lines) - 4) // 5
-        if date_pattern_matches >= potential_date_lines // 2 and potential_date_lines > 0:
-            # Check if line 1 and line 3 are similar or identical (repeated course name)
-            repeats_found = 0
-            for i in range(0, len(lines) - 3, 5):
-                # Check for exact match or high similarity
-                if (lines[i] == lines[i+2] or 
-                    (len(lines[i]) > 5 and len(lines[i+2]) > 5 and 
-                    (lines[i] in lines[i+2] or lines[i+2] in lines[i]))):
-                    repeats_found += 1
-            
-            # If we found at least some repeated courses, it's likely this format
-            if repeats_found >= 1:
-                is_repeated_course_format = True
-                st.write(f"Detected 5-line repeated course format with {repeats_found} repeats")
+    # Process in blocks of 5 lines
+    total_blocks = len(lines) // 5
+    st.write(f"Found {total_blocks} potential tournament blocks")
     
-    # If confirmed as repeated course format, process it
-    if is_repeated_course_format:
-        # Process in blocks of 5 lines
-        total_blocks = len(lines) // 5
-        for i in range(total_blocks):
-            block_start = i * 5
+    # Process each block of 5 lines
+    for i in range(0, len(lines), 5):
+        # Skip if we don't have a complete block of 5 lines
+        if i + 4 >= len(lines):
+            break
             
-            # If we don't have enough lines for a complete entry, skip
-            if block_start + 4 >= len(lines):
-                break
-                
-            course1 = lines[block_start]
-            tournament_name = lines[block_start + 1]
-            course2 = lines[block_start + 2]
-            location = lines[block_start + 3]
-            date_range = lines[block_start + 4]
+        try:
+            # Extract the 5 lines for this tournament
+            course1 = lines[i]
+            tournament_name = lines[i+1]
+            course2 = lines[i+2]
+            location = lines[i+3]
+            date_range = lines[i+4]
+            
+            # Debug the current block
+            if i < 30 or i % 50 == 0:  # Show details for first few blocks and then periodically
+                st.write(f"Processing block {i//5 + 1}:")
+                st.write(f"  Course: {course1}")
+                st.write(f"  Name: {tournament_name}")
+                st.write(f"  Location: {location}")
+                st.write(f"  Date: {date_range}")
             
             # Extract city and state from location line
             city = None
@@ -840,23 +821,49 @@ def parse_amateur_golf_format_improved(text, default_year="2025", default_state=
             
             # Extract date from date range
             date_value = None
-            date_match = re.search(r'([A-Za-z]+)\s+(\d{1,2}),?\s+(\d{4})', date_range)
-            date_range_match = re.search(r'([A-Za-z]+)\s+(\d{1,2})\s*-\s*(?:[A-Za-z]+\s+)?(?:\d{1,2})?,\s*(\d{4})', date_range)
             
-            if date_match:
-                month_name = date_match.group(1)
-                day = date_match.group(2)
-                year = date_match.group(3)
+            # Try different date patterns
+            # Pattern 1: "May 28, 2025 - May 28, 2025"
+            date_match1 = re.search(r'([A-Za-z]+)\s+(\d{1,2}),\s+(\d{4})', date_range)
+            
+            # Pattern 2: "May 28 - May 29, 2025"
+            date_match2 = re.search(r'([A-Za-z]+)\s+(\d{1,2})\s+-\s+[A-Za-z]+\s+\d{1,2},\s+(\d{4})', date_range)
+            
+            # Pattern 3: "May 28 - 29, 2025"
+            date_match3 = re.search(r'([A-Za-z]+)\s+(\d{1,2})\s+-\s+\d{1,2},\s+(\d{4})', date_range)
+            
+            if date_match1:
+                month_name = date_match1.group(1)
+                day = date_match1.group(2)
+                year = date_match1.group(3)
                 
                 # Get month number
                 month = month_map.get(month_name[:3], '01')
                 
                 # Format date
                 date_value = f"{year}-{month}-{day.zfill(2)}"
-            elif date_range_match:
-                month_name = date_range_match.group(1)
-                day = date_range_match.group(2)
-                year = date_range_match.group(3)
+            elif date_match2:
+                parts = date_range.split(" - ")
+                first_date = parts[0].strip()
+                month_day = first_date.split(" ")
+                month_name = month_day[0]
+                day = month_day[1]
+                year_match = re.search(r'(\d{4})', date_range)
+                year = year_match.group(1) if year_match else default_year
+                
+                # Get month number
+                month = month_map.get(month_name[:3], '01')
+                
+                # Format date
+                date_value = f"{year}-{month}-{day.zfill(2)}"
+            elif date_match3:
+                parts = date_range.split(" - ")
+                first_date = parts[0].strip()
+                month_day = first_date.split(" ")
+                month_name = month_day[0]
+                day = month_day[1]
+                year_match = re.search(r'(\d{4})', date_range)
+                year = year_match.group(1) if year_match else default_year
                 
                 # Get month number
                 month = month_map.get(month_name[:3], '01')
@@ -864,33 +871,36 @@ def parse_amateur_golf_format_improved(text, default_year="2025", default_state=
                 # Format date
                 date_value = f"{year}-{month}-{day.zfill(2)}"
             else:
-                # Try other date patterns
-                simple_date_match = re.search(r'([A-Za-z]+)\s+(\d{1,2})', date_range)
-                if simple_date_match:
-                    month_name = simple_date_match.group(1)
-                    day = simple_date_match.group(2)
-                    
-                    # Get month number
-                    month = month_map.get(month_name[:3], '01')
-                    
-                    # Use default year
-                    date_value = f"{default_year}-{month}-{day.zfill(2)}"
+                # Fallback: try a simple extraction
+                for month_name in month_map.keys():
+                    if month_name in date_range:
+                        day_match = re.search(fr'{month_name}\s+(\d{{1,2}})', date_range)
+                        if day_match:
+                            day = day_match.group(1)
+                            year_match = re.search(r'(\d{4})', date_range)
+                            year = year_match.group(1) if year_match else default_year
+                            month = month_map.get(month_name[:3], '01')
+                            date_value = f"{year}-{month}-{day.zfill(2)}"
+                            break
             
+            # Only proceed if we have a valid date
             if date_value:
                 # Determine category and gender
                 name_lower = tournament_name.lower()
-                category = None
-                gender = None
                 
-                # Category detection
+                # Default values
+                category = "Open"
+                gender = "Men's"
+                
+                # Specific category detection
                 if "u.s. open" in name_lower and "qualifier" in name_lower and "senior" not in name_lower:
-                    category = "Open"
+                    category = "Qualifier"
                     gender = "Men's"
                 elif "u.s. senior open" in name_lower or "senior open" in name_lower:
                     category = "Seniors"
                     gender = "Men's"
                 elif "u.s. women's open" in name_lower:
-                    category = "Open"
+                    category = "Qualifier"
                     gender = "Women's"
                 elif "mid-amateur" in name_lower or "mid amateur" in name_lower:
                     category = "Mid-Amateur"
@@ -898,40 +908,39 @@ def parse_amateur_golf_format_improved(text, default_year="2025", default_state=
                 elif "match play" in name_lower:
                     category = "Match Play"
                     gender = "Men's"
-                elif "senior" in name_lower and "super" not in name_lower and "women" not in name_lower:
+                elif "senior" in name_lower and "women" not in name_lower:
                     category = "Seniors"
                     gender = "Men's"
-                elif "super senior" in name_lower or "super-senior" in name_lower:
+                elif "super senior" in name_lower:
                     category = "Super Senior"
                     gender = "Men's"
-                elif "junior" in name_lower and "girls" not in name_lower and "boys" not in name_lower:
+                elif "junior" in name_lower and "girls" not in name_lower and "boys" in name_lower:
+                    category = "Junior's"
+                    gender = "Men's"
+                elif "junior boys" in name_lower or "boys junior" in name_lower or "boys'" in name_lower:
                     category = "Junior's"
                     gender = "Men's"
                 elif "junior girls" in name_lower or "girls junior" in name_lower or "girls'" in name_lower:
                     category = "Junior's"
                     gender = "Women's"
-                elif "junior boys" in name_lower or "boys junior" in name_lower or "boys'" in name_lower:
+                elif "women" in name_lower or "ladies" in name_lower or "women's" in name_lower:
+                    category = "Women's"
+                    gender = "Women's"
+                elif "girls" in name_lower:
                     category = "Junior's"
-                    gender = "Men's"
+                    gender = "Women's"
                 elif "amateur" in name_lower and "mid-amateur" not in name_lower:
                     category = "Amateur"
-                    gender = "Men's"
-                elif ("open" in name_lower or "championship" in name_lower) and "qualifier" not in name_lower:
-                    category = "Open"
                     gender = "Men's"
                 elif "four-ball" in name_lower:
                     category = "Four-Ball"
                     gender = "Men's"
-                elif "father-son" in name_lower or "parent-child" in name_lower or "father & son" in name_lower:
-                    category = "Mixed Family"
+                elif "father-son" in name_lower or "father & son" in name_lower:
+                    category = "Father & Son"
                     gender = "Mixed"
-                elif "women" in name_lower or "ladies" in name_lower:
-                    category = "Women's"
-                    gender = "Women's"
-                else:
-                    # Default values if no specific category detected
-                    category = "Men's"
-                    gender = "Men's"
+                elif "parent-child" in name_lower:
+                    category = "Parent & Child"
+                    gender = "Mixed"
                 
                 # Create tournament entry
                 tournament = {
@@ -946,31 +955,32 @@ def parse_amateur_golf_format_improved(text, default_year="2025", default_state=
                 }
                 
                 tournaments.append(tournament)
-                # Only print for the first few tournaments to avoid flooding the output
-                if len(tournaments) <= 10 or len(tournaments) % 10 == 0:
-                    st.write(f"✓ Added tournament #{len(tournaments)} (5-line): {tournament_name}")
-                    
-        # If we successfully found tournaments, return the results
-        if tournaments:
-            st.write(f"Amateur Golf parser: Found {len(tournaments)} tournaments")
-            df = pd.DataFrame(tournaments)
-            
-            # Ensure specific column order
-            columns = ["Date", "Name", "Course", "Category", "Gender", "City", "State", "Zip"]
-            for col in columns:
-                if col not in df.columns:
-                    df[col] = None
-            
-            # Return DataFrame with defined column order
-            return df[columns]
+                
+                # Only show success messages for some tournaments to avoid flooding the output
+                if len(tournaments) <= 10 or len(tournaments) % 20 == 0:
+                    st.write(f"✓ Added tournament: {tournament_name}")
+            else:
+                st.write(f"❌ Couldn't extract date from: {date_range}")
+        
+        except Exception as e:
+            st.write(f"❌ Error processing block at index {i}: {str(e)}")
     
-    # If not the repeated course format or no tournaments found, try other formats
-    # This part would contain the rest of your parsing logic for other formats,
-    # but we'll skip it for brevity since we're focusing on the specific format issue
-    
-    # Return empty DataFrame if no tournaments found
-    st.write("Amateur Golf parser: No tournaments found or format not recognized")
-    return pd.DataFrame(columns=["Date", "Name", "Course", "Category", "Gender", "City", "State", "Zip"])
+    # Convert to DataFrame
+    if tournaments:
+        st.write(f"Amateur Golf format parser: Found {len(tournaments)} tournaments")
+        df = pd.DataFrame(tournaments)
+        
+        # Ensure columns exist in the correct order
+        columns = ["Date", "Name", "Course", "Category", "Gender", "City", "State", "Zip"]
+        for col in columns:
+            if col not in df.columns:
+                df[col] = None
+        
+        return df[columns]
+    else:
+        # Return empty DataFrame with required columns
+        st.write("Amateur Golf format parser: No tournaments found")
+        return pd.DataFrame(columns=["Date", "Name", "Course", "Category", "Gender", "City", "State", "Zip"])
 
 def parse_golf_genius_format(text, default_year="2025", default_state=None):
     """
@@ -2875,8 +2885,34 @@ def parse_events_with_sections_format(text):
 
 def detect_format(text):
     """Detect which format the text is in."""
-     # Split the text into lines and check for patterns
-    lines = [line.strip() for line in text.split('\n')]
+    # Split the text into lines and check for patterns
+    lines = [line.strip() for line in text.split('\n') if line.strip()]
+    
+    # Check for Amateur Golf format with 5-line pattern
+    amateur_golf_format = False
+    if len(lines) >= 10:  # Need at least 10 lines (2 blocks)
+        # Check if the data follows a pattern where every 5th line is a date
+        date_patterns = 0
+        location_patterns = 0
+        
+        # Check if blocks of 5 lines follow the pattern
+        for i in range(0, min(len(lines) - 4, 50), 5):
+            # Line 4 should have City, State pattern
+            if i + 3 < len(lines) and re.search(r'.*,\s+[A-Z]{2}$', lines[i + 3]):
+                location_patterns += 1
+                
+            # Line 5 should have a date pattern
+            date_pattern = r'(January|February|March|April|May|June|July|August|September|October|November|December|Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d{1,2}'
+            if i + 4 < len(lines) and re.search(date_pattern, lines[i + 4]):
+                date_patterns += 1
+        
+        # If we have enough matches, it's likely the Amateur Golf format
+        blocks_checked = min(len(lines) // 5, 10)
+        if date_patterns >= blocks_checked * 0.6 and location_patterns >= blocks_checked * 0.6:
+            amateur_golf_format = True
+    
+    if amateur_golf_format:
+        return "AMATEUR_GOLF_FORMAT"
 
     # Check for Montana format with 3-line pattern: name, date-course, categories
     montana_pattern_count = 0
@@ -3814,71 +3850,55 @@ def ensure_column_order(df):
 if st.button("Process Tournament Data"):
     if tournament_text:
         try:
-            # Try to detect Golf Genius format first (has "View" lines and a specific pattern)
-            if "View" in tournament_text and ("OPEN" in tournament_text or "OPENS" in tournament_text or "closes on" in tournament_text):
-                st.write("Detected Golf Genius format - using specialized parser")
-                df = parse_golf_genius_format(tournament_text, year, default_state)
+            # Detect format
+            format_type = detect_format(tournament_text)
+            st.write(f"Detected format: {format_type}")
             
-            # If that didn't work, try other formats
-            elif "View" in tournament_text:
-                st.write("Detected NNGA format - using specialized parser")
-                # Use whichever NNGA parser function exists in your code
+            # Parse based on detected format
+            if format_type == "AMATEUR_GOLF_FORMAT":
+                df = parse_amateur_golf_format_improved(tournament_text, year, default_state)
+            elif format_type == "MONTANA_FORMAT":
+                df = parse_montana_format(tournament_text)
+            elif format_type == "MISSOURI_FORMAT":
+                df = parse_missouri_tournament_format(tournament_text)
+            elif format_type == "GAM_CHAMPIONSHIP_FORMAT":
+                df = parse_gam_championship_format(tournament_text)
+            elif format_type == "COURSE_FIRST_FORMAT":
+                df = parse_course_tournament_format(tournament_text, year, default_state)
+            elif format_type == "NAME_DATE_COURSE_FORMAT":
+                df = parse_name_date_course_format(tournament_text)
+            elif format_type == "CDGA_FORMAT":
+                df = parse_cdga_format(tournament_text)
+            elif format_type == "EVENTS_WITH_SECTIONS_FORMAT":
+                df = parse_events_with_sections_format(tournament_text)
+            elif format_type == "SIMPLE_DATE_CLUB_CITY_FORMAT":
+                df = parse_simple_date_club_city_format(tournament_text)
+            elif format_type == "ENTRIES_CLOSE_FORMAT":
+                df = parse_entries_close_format(tournament_text)
+            elif format_type == "CHAMPIONSHIP_TABLE_FORMAT":
+                df = parse_championship_table_format(tournament_text)
+            elif format_type == "FOUR_LINE_FORMAT":
+                df = parse_four_line_format(tournament_text)
+            elif format_type == "MARKDOWN_FORMAT":
+                df = parse_markdown_format(tournament_text)
+            elif format_type == "CUSTOM_FORMAT":
+                df = parse_custom_format(tournament_text)
+            elif format_type == "STATUS_BASED_FORMAT":
+                df = parse_status_based_format(tournament_text)
+            elif format_type == "USGA_QUALIFIER_FORMAT":
+                # Try to use USGA parser
                 if 'parse_usga_qualifier_format' in globals():
                     df = parse_usga_qualifier_format(tournament_text)
                 elif 'parse_usga_view_format' in globals():
                     df = parse_usga_view_format(tournament_text)
                 else:
-                    # Fallback to standard parsing
-                    st.write("No specialized NNGA parser found, using standard format detection")
-                    df = parse_tournament_text(tournament_text)
-            
-            # Try the improved unified Amateur Golf format parser
-            elif len(tournament_text.split('\n')) >= 10:  # Need at least 10 lines for pattern detection
-                df = parse_amateur_golf_format_improved(tournament_text, year, default_state)
-                
-                if not df.empty:
-                    st.write(f"Successfully parsed {len(df)} tournaments using improved Amateur Golf format parser")
-                # If Amateur Golf parser didn't work, try other formats
-                else:
-                    # Check for monthly entries format with month headers
-                    if re.search(r'Entry Deadline:|Entries Closed|Entries Open:', tournament_text):
-                        st.write("Detected Monthly-Entries format - using specialized parser")
-                        df = parse_monthly_entries_format(tournament_text, year, default_state)
-                    
-                    # Check for day-month-tournament pattern
-                    elif any(line.isdigit() and 1 <= int(line) <= 31 for line in tournament_text.split('\n')):
-                        # Split into lines and filter out empty ones
-                        lines = [line.strip() for line in tournament_text.split('\n') if line.strip()]
-                        
-                        # Count pattern occurrences: day number followed by month name
-                        month_names = ['Jan', 'January', 'Feb', 'February', 'Mar', 'March', 
-                                     'Apr', 'April', 'May', 'Jun', 'June', 'Jul', 'July', 
-                                     'Aug', 'August', 'Sep', 'September', 'Oct', 'October',
-                                     'Nov', 'November', 'Dec', 'December']
-                        
-                        pattern_count = 0
-                        for i in range(len(lines) - 1):
-                            if (lines[i].isdigit() and 1 <= int(lines[i]) <= 31 and 
-                                i+1 < len(lines) and lines[i+1] in month_names):
-                                pattern_count += 1
-                        
-                        if pattern_count >= 2:
-                            st.write("Detected Day-Month-Tournament format - using specialized parser")
-                            df = parse_day_month_tournament_format(tournament_text, year, default_state)
-                        else:
-                            # Fall back to standard format detection
-                            st.write("Using standard format detection")
-                            df = parse_tournament_text(tournament_text)
-                    else:
-                        # For other formats, use the original format detection and parsing
-                        st.write("Using standard format detection")
-                        df = parse_tournament_text(tournament_text)
+                    # Fall back to generic parser
+                    df = parse_status_based_format(tournament_text)
             else:
-                # Not enough lines for pattern detection, use standard parsing
-                st.write("Using standard format detection")
-                df = parse_tournament_text(tournament_text)
+                # If no specific format is detected, try the most generic parser
+                st.write("No specific format detected, trying generic parser")
+                df = parse_status_based_format(tournament_text)  # Use status-based format as fallback
             
-            # Rest of processing remains the same
             # Check if DataFrame is empty
             if df.empty:
                 st.error("No tournaments could be extracted from the text. Please check the format.")
