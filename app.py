@@ -844,11 +844,17 @@ def parse_amateur_golf_format_improved(text, default_year="2025", default_state=
             if start_idx + 4 >= len(lines):
                 break
                 
-            course1 = lines[start_idx]
-            tournament_name = lines[start_idx + 1]
-            course2 = lines[start_idx + 2]
-            location = lines[start_idx + 3]
-            date_range = lines[start_idx + 4]
+            # In the 5-line format:
+            # Line 1: Course Name
+            # Line 2: Tournament Name
+            # Line 3: Course Name (repeated)
+            # Line 4: City, State
+            # Line 5: Date Range
+            
+            course_name = lines[start_idx]        # First line is the course name
+            tournament_name = lines[start_idx + 1] # Second line is the tournament name
+            location = lines[start_idx + 3]        # Fourth line is location
+            date_range = lines[start_idx + 4]      # Fifth line is date range
             
             # Extract city and state from location line
             state = default_state
@@ -940,21 +946,26 @@ def parse_amateur_golf_format_improved(text, default_year="2025", default_state=
                         category = "Veterans"
                     else:
                         category = "Classic"
+                elif "championship" in name_lower:
+                    category = "Championship"
                 elif "women" in name_lower or "ladies" in name_lower:
                     category = "Women's"
                     gender = "Women's"
                 
-                # Create tournament entry
+                # Create tournament entry - make sure we correctly assign each field
                 tournament = {
                     "Date": date_value,
-                    "Name": tournament_name,
-                    "Course": course1,
+                    "Name": tournament_name,      # Tournament name from line 2
+                    "Course": course_name,        # Course name from line 1
                     "Category": category,
                     "Gender": gender,
-                    "City": city,
-                    "State": state,
+                    "City": city,                 # City from location (line 4)
+                    "State": state,               # State from location (line 4)
                     "Zip": None
                 }
+                
+                # Debug output for each parsed entry
+                st.write(f"Parsed tournament: Date={date_value}, Name={tournament_name}, Course={course_name}, City={city}, State={state}")
                 
                 tournaments.append(tournament)
                 # Only print for the first few tournaments to avoid flooding the output
@@ -1348,6 +1359,12 @@ def parse_amateur_golf_format_improved(text, default_year="2025", default_state=
     if tournaments:
         st.write(f"Amateur Golf parser: Found {len(tournaments)} tournaments")
         df = pd.DataFrame(tournaments)
+        
+        # Debug: Print column assignments 
+        st.write("Column assignments check:")
+        if not df.empty:
+            for i, row in df.head(3).iterrows():
+                st.write(f"Tournament {i+1}: Date={row['Date']}, Name={row['Name']}, Course={row['Course']}, City={row.get('City', 'N/A')}, State={row.get('State', 'N/A')}")
         
         # Ensure specific column order
         columns = ["Date", "Name", "Course", "Category", "Gender", "City", "State", "Zip"]
