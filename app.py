@@ -739,13 +739,12 @@ def parse_usga_view_format(text):
     
 def parse_amateur_golf_format_improved(text, default_year="2025", default_state=None):
     """
-    Universal parser for amateur golf tournaments that automatically adapts to different formats.
+    Enhanced universal parser for amateur golf tournaments that automatically adapts to different formats.
     
-    Automatically detects and handles these common patterns:
+    Handles these common patterns:
     - 5-line format (Course-Name-Course-Location-Date)
-    - 5-line format with switch (Name-Course-Name-Location-Date)
     - 4-line format (Name-Course-Location-Date)
-    - And potential variations
+    - And their variations with improved error handling and logging
     
     Arguments:
     text -- The raw tournament text
@@ -757,11 +756,12 @@ def parse_amateur_golf_format_improved(text, default_year="2025", default_state=
     """
     import re
     import pandas as pd
+    import streamlit as st
     
-    # Process text into lines
+    # Process text into lines (strip each line and remove empty ones)
     lines = [line.strip() for line in text.split('\n') if line.strip()]
     
-    # Month mapping
+    # Month mapping for date parsing
     month_map = {
         'Jan': '01', 'January': '01',
         'Feb': '02', 'February': '02',
@@ -779,243 +779,30 @@ def parse_amateur_golf_format_improved(text, default_year="2025", default_state=
     
     # Indicators for tournament and course detection
     course_indicators = ["Golf", "Club", "Course", "Country", "Resort", "GC", "CC", "Inn", "Valley", "Ridge", 
-                         "Plantation", "Links", "National", "Pines", "Hills", "Creek", "Creek", "Dunes"]
+                         "Plantation", "Links", "National", "Pines", "Hills", "Creek", "Dunes"]
     tournament_indicators = ["Championship", "Amateur", "Open", "Junior", "Qualifier", "Invitational", 
                              "Tournament", "Match Play", "Classic", "Senior", "Cup", "Challenge"]
     
-    # Results list
+    # Results list for tournaments
     tournaments = []
     
-    # Debug output
+    # Log the start of processing
     st.write(f"Amateur Golf format parser: Processing {len(lines)} lines")
     
-    # DETECT THE FORMAT
-    # We'll analyze the data to determine which format is being used
+    # DETECT THE FORMAT - Improved algorithm
+    format_detection = detect_tournament_format(lines, month_map)
+    format_type = format_detection["format"]
+    pattern_switch_index = format_detection["pattern_switch_index"]
     
-    # First, check for 4-line format
-    format_4line_score = 0
-    # Check for blocks where every 4th line has a date and every 3rd line has a city, state
-    sample_points = min(10, len(lines) // 4)
-    for i in range(0, min(len(lines) - 3, 40), 4):
-        if i + 3 < len(lines):
-            # Check if line 3 has City, State format
-            if re.search(r'.*,\s+[A-Z]{2}$', lines[i+2]):
-                # Check if line 4 has a date
-                if any(month in lines[i+3] for month in month_map.keys()):
-                    format_4line_score += 1
-    
-    # Check for 5-line format
-    format_5line_score = 0
-    # Check for blocks where every 5th line has a date and every 4th line has a city, state
-    sample_points_5 = min(10, len(lines) // 5)
-    for i in range(0, min(len(lines) - 4, 50), 5):
-        if i + 4 < len(lines):
-            # Check if line 4 has City, State format
-            if re.search(r'.*,\s+[A-Z]{2}$', lines[i+3]):
-                # Check if line 5 has a date
-                if any(month in lines[i+4] for month in month_map.keys()):
-                    format_5line_score += 1
-    
-    # Determine which format to use
-    using_4line_format = False
-    
-    # If we have scores for both formats, use the one with the higher percentage match
-    if sample_points > 0 and sample_points_5 > 0:
-        format_4line_percent = format_4line_score / sample_points
-        format_5line_percent = format_5line_score / sample_points_5
-        
-        using_4line_format = format_4line_percent > format_5line_percent
-    elif format_4line_score > 0:
-        using_4line_format = True
-    
-    st.write(f"Format detection: 4-line score: {format_4line_score}/{sample_points}, 5-line score: {format_5line_score}/{sample_points_5}")
-    st.write(f"Using {'4-line' if using_4line_format else '5-line'} format")
-    
-    # For 5-line format, check if there's a pattern switch
-    pattern_switch_index = -1
-    if not using_4line_format:
-        for i in range(0, len(lines) - 9, 5):
-            # Current block
-            line1 = lines[i] if i < len(lines) else ""
-            line2 = lines[i+1] if i+1 < len(lines) else ""
-            
-            # Next block
-            next_line1 = lines[i+5] if i+5 < len(lines) else ""
-            next_line2 = lines[i+5+1] if i+5+1 < len(lines) else ""
-            
-            # Score each line for course or tournament characteristics
-            current_line1_course_score = sum(1 for indicator in course_indicators if indicator in line1)
-            current_line2_tournament_score = sum(1 for indicator in tournament_indicators if indicator in line2)
-            
-            next_line1_tournament_score = sum(1 for indicator in tournament_indicators if indicator in next_line1)
-            next_line2_course_score = sum(1 for indicator in course_indicators if indicator in next_line2)
-            
-            # If current block follows Pattern A and next block follows Pattern B
-            if (current_line1_course_score > 0 and current_line2_tournament_score > 0 and
-                next_line1_tournament_score > 1 and next_line2_course_score > 0 and
-                current_line1_course_score > current_line1_tournament_score and
-                next_line1_tournament_score > next_line1_course_score):
-                
-                pattern_switch_index = i+5
-                st.write(f"Detected format change at index {pattern_switch_index}, line: '{next_line1}'")
-                break
+    st.write(f"Format detection results: {format_type}")
+    if pattern_switch_index >= 0:
+        st.write(f"Pattern switch detected at line {pattern_switch_index}")
     
     # PROCESS THE DATA ACCORDING TO THE DETECTED FORMAT
-    
-    # Process with 4-line format
-    if using_4line_format:
-        st.write(f"Processing with 4-line format: {len(lines) // 4} blocks")
-        for i in range(0, len(lines) - 3, 4):
-            try:
-                # In 4-line format:
-                # Line 1: Tournament Name
-                # Line 2: Course Name
-                # Line 3: City, State
-                # Line 4: Date Range
-                
-                tournament_name = lines[i]
-                course_name = lines[i+1]
-                location = lines[i+2]
-                date_range = lines[i+3]
-                
-                # Debug the current block
-                if i < 20 or i % 40 == 0:  # Show details for first few blocks and then periodically
-                    st.write(f"Processing 4-line block {i//4 + 1}:")
-                    st.write(f"  Name: {tournament_name}")
-                    st.write(f"  Course: {course_name}")
-                    st.write(f"  Location: {location}")
-                    st.write(f"  Date: {date_range}")
-                
-                # Extract city and state from location line
-                city = None
-                state = default_state
-                
-                location_match = re.search(r'(.*?),\s+([A-Z]{2})$', location)
-                if location_match:
-                    city = location_match.group(1).strip()
-                    state = location_match.group(2).strip()
-                
-                # Extract date
-                date_value = extract_date(date_range, month_map, default_year)
-                
-                # If date extraction failed, try fallback methods
-                if not date_value:
-                    date_value = fallback_date_extraction(date_range, lines, i, month_map, default_year, tournaments)
-                
-                # Only proceed if we have valid data for a tournament
-                if tournament_name and course_name:
-                    # Determine category and gender from tournament name
-                    category, gender = determine_tournament_type(tournament_name)
-                    
-                    # Create tournament entry
-                    tournament = {
-                        "Date": date_value,
-                        "Name": tournament_name,
-                        "Course": course_name,
-                        "Category": category,
-                        "Gender": gender,
-                        "City": city,
-                        "State": state,
-                        "Zip": None
-                    }
-                    
-                    tournaments.append(tournament)
-                    
-                    # Show success messages for some tournaments to avoid flooding the output
-                    if len(tournaments) <= 10 or len(tournaments) % 20 == 0:
-                        st.write(f"✓ Added tournament: {tournament_name}")
-                else:
-                    st.write(f"❌ Skipping incomplete data at block {i//4 + 1}")
-            
-            except Exception as e:
-                st.write(f"❌ Error processing 4-line block at index {i}: {str(e)}")
-    
-    # Process with 5-line format
-    else:
-        st.write(f"Processing with 5-line format: {len(lines) // 5} blocks")
-        for i in range(0, len(lines) - 4, 5):
-            try:
-                # Determine if this block uses the original or switched pattern
-                using_pattern_b = (pattern_switch_index >= 0 and i >= pattern_switch_index)
-                
-                # In Pattern A (original):
-                # Line 1: Course Name
-                # Line 2: Tournament Name
-                # Line 3: Course Name (repeated)
-                # Line 4: City, State
-                # Line 5: Date Range
-                
-                # In Pattern B (switched):
-                # Line 1: Tournament Name
-                # Line 2: Course Name
-                # Line 3: Tournament Name (repeated) or unused
-                # Line 4: City, State
-                # Line 5: Date Range
-                
-                if using_pattern_b:
-                    tournament_name = lines[i]
-                    course_name = lines[i+1]
-                    unused = lines[i+2]  # Not used, but keep for consistency
-                    location = lines[i+3]
-                    date_range = lines[i+4]
-                else:
-                    course_name = lines[i]
-                    tournament_name = lines[i+1]
-                    unused = lines[i+2]  # Course repeated, not needed
-                    location = lines[i+3]
-                    date_range = lines[i+4]
-                
-                # Debug the current block
-                if i < 30 or i % 50 == 0 or using_pattern_b and i < pattern_switch_index + 20:
-                    st.write(f"Processing 5-line block {i//5 + 1} {'(Pattern B)' if using_pattern_b else '(Pattern A)'}:")
-                    st.write(f"  {'Name' if using_pattern_b else 'Course'}: {lines[i]}")
-                    st.write(f"  {'Course' if using_pattern_b else 'Name'}: {lines[i+1]}")
-                    st.write(f"  Location: {location}")
-                    st.write(f"  Date: {date_range}")
-                
-                # Extract city and state from location line
-                city = None
-                state = default_state
-                
-                location_match = re.search(r'(.*?),\s+([A-Z]{2})$', location)
-                if location_match:
-                    city = location_match.group(1).strip()
-                    state = location_match.group(2).strip()
-                
-                # Extract date
-                date_value = extract_date(date_range, month_map, default_year)
-                
-                # If date extraction failed, try fallback methods
-                if not date_value:
-                    date_value = fallback_date_extraction(date_range, lines, i, month_map, default_year, tournaments)
-                
-                # Only proceed if we have valid data for a tournament
-                if tournament_name and course_name:
-                    # Determine category and gender from tournament name
-                    category, gender = determine_tournament_type(tournament_name)
-                    
-                    # Create tournament entry
-                    tournament = {
-                        "Date": date_value,
-                        "Name": tournament_name,
-                        "Course": course_name,
-                        "Category": category,
-                        "Gender": gender,
-                        "City": city,
-                        "State": state,
-                        "Zip": None
-                    }
-                    
-                    tournaments.append(tournament)
-                    
-                    # Show success messages for some tournaments to avoid flooding the output
-                    if len(tournaments) <= 10 or len(tournaments) % 20 == 0 or (using_pattern_b and i < pattern_switch_index + 15):
-                        st.write(f"✓ Added tournament: {tournament_name}")
-                else:
-                    st.write(f"❌ Skipping incomplete data at block {i//5 + 1}")
-            
-            except Exception as e:
-                st.write(f"❌ Error processing 5-line block at index {i}: {str(e)}")
+    if format_type == "4-line":
+        process_4line_format(lines, month_map, default_year, default_state, tournaments)
+    else:  # 5-line
+        process_5line_format(lines, month_map, default_year, default_state, tournaments, pattern_switch_index)
     
     # Convert to DataFrame
     if tournaments:
@@ -1033,6 +820,294 @@ def parse_amateur_golf_format_improved(text, default_year="2025", default_state=
         # Return empty DataFrame with required columns
         st.write("Amateur Golf format parser: No tournaments found")
         return pd.DataFrame(columns=["Date", "Name", "Course", "Category", "Gender", "City", "State", "Zip"])
+
+
+def detect_tournament_format(lines, month_map):
+    """
+    Enhanced format detection that analyzes the data to determine the best format to use.
+    Returns a dictionary with the detected format and other metadata.
+    """
+    import re
+    import streamlit as st
+    
+    # Initialize result
+    result = {
+        "format": "5-line",  # Default to 5-line format
+        "pattern_switch_index": -1
+    }
+    
+    # First, check for 4-line format
+    format_4line_score = 0
+    format_4line_indices = []
+    
+    # We'll check more blocks for better accuracy
+    sample_points = min(20, len(lines) // 4)
+    for i in range(0, min(len(lines) - 3, 80), 4):
+        if i + 3 < len(lines):
+            # Check if line 3 has City, State format
+            if re.search(r'.*,\s+[A-Z]{2}$', lines[i+2]):
+                # Check if line 4 has a date
+                if any(month in lines[i+3] for month in month_map.keys()):
+                    format_4line_score += 1
+                    format_4line_indices.append(i)
+    
+    # Check for 5-line format
+    format_5line_score = 0
+    format_5line_indices = []
+    
+    # We'll check more blocks for better accuracy
+    sample_points_5 = min(20, len(lines) // 5)
+    for i in range(0, min(len(lines) - 4, 100), 5):
+        if i + 4 < len(lines):
+            # Check if line 4 has City, State format
+            if re.search(r'.*,\s+[A-Z]{2}$', lines[i+3]):
+                # Check if line 5 has a date
+                if any(month in lines[i+4] for month in month_map.keys()):
+                    format_5line_score += 1
+                    format_5line_indices.append(i)
+    
+    # Calculate percentages for comparison
+    format_4line_percent = format_4line_score / max(1, sample_points)
+    format_5line_percent = format_5line_score / max(1, sample_points_5)
+    
+    st.write(f"Format detection: 4-line score: {format_4line_score}/{sample_points} ({format_4line_percent:.2f}), " +
+             f"5-line score: {format_5line_score}/{sample_points_5} ({format_5line_percent:.2f})")
+    
+    # Determine which format to use with improved logic
+    # Only switch to 4-line if it's significantly better or if 5-line is very poor
+    if (format_4line_percent > 0.6 and format_4line_percent > format_5line_percent * 1.2) or format_5line_percent < 0.3:
+        result["format"] = "4-line"
+        st.write("Choosing 4-line format based on detection scores")
+    else:
+        # Default to 5-line format which is more common
+        result["format"] = "5-line"
+        st.write("Choosing 5-line format based on detection scores")
+    
+    # For 5-line format, check if there's a pattern switch (improved algorithm)
+    if result["format"] == "5-line":
+        pattern_switch_index = detect_pattern_switch(lines)
+        if pattern_switch_index >= 0:
+            result["pattern_switch_index"] = pattern_switch_index
+    
+    return result
+
+
+def detect_pattern_switch(lines):
+    """
+    Enhanced detection of pattern switches in 5-line format.
+    Returns the index where the pattern switches, or -1 if no switch is detected.
+    """
+    import streamlit as st
+    
+    # Indicators to help detect pattern switches
+    course_indicators = ["Golf", "Club", "Course", "Country", "Resort", "GC", "CC", "Inn"]
+    tournament_indicators = ["Championship", "Amateur", "Open", "Junior", "Qualifier", "Invitational", "Match Play"]
+    
+    # Look through 5-line blocks
+    for i in range(0, len(lines) - 9, 5):
+        # Current block
+        line1 = lines[i] if i < len(lines) else ""
+        line2 = lines[i+1] if i+1 < len(lines) else ""
+        
+        # Next block
+        next_line1 = lines[i+5] if i+5 < len(lines) else ""
+        next_line2 = lines[i+5+1] if i+5+1 < len(lines) else ""
+        
+        # Count indicators for first block
+        current_line1_course_score = sum(1 for indicator in course_indicators if indicator in line1)
+        current_line2_tournament_score = sum(1 for indicator in tournament_indicators if indicator in line2)
+        
+        # Count indicators for next block
+        next_line1_tournament_score = sum(1 for indicator in tournament_indicators if indicator in next_line1)
+        next_line2_course_score = sum(1 for indicator in course_indicators if indicator in next_line2)
+        
+        # Check for reverse pattern (improved detection)
+        if (current_line1_course_score >= 1 and 
+            next_line1_tournament_score >= 1 and 
+            not any(indicator in next_line1 for indicator in course_indicators) and
+            next_line2_course_score >= 1):
+            
+            # Additional validation - check City,State pattern is consistent
+            if (i+3 < len(lines) and re.search(r'.*,\s+[A-Z]{2}$', lines[i+3]) and
+                i+8 < len(lines) and re.search(r'.*,\s+[A-Z]{2}$', lines[i+8])):
+                
+                st.write(f"Detected format change at index {i+5}, line: '{next_line1}'")
+                return i+5
+    
+    return -1
+
+
+def process_4line_format(lines, month_map, default_year, default_state, tournaments):
+    """
+    Process tournament data in 4-line format
+    """
+    import re
+    import streamlit as st
+    
+    st.write(f"Processing with 4-line format: {len(lines) // 4} blocks")
+    
+    for i in range(0, len(lines) - 3, 4):
+        try:
+            # In 4-line format:
+            # Line 1: Tournament Name
+            # Line 2: Course Name
+            # Line 3: City, State
+            # Line 4: Date Range
+            
+            tournament_name = lines[i]
+            course_name = lines[i+1]
+            location = lines[i+2]
+            date_range = lines[i+3]
+            
+            # Debug the current block
+            if i < 20 or i % 40 == 0:  # Show details for first few blocks and then periodically
+                st.write(f"Processing 4-line block {i//4 + 1}:")
+                st.write(f"  Name: {tournament_name}")
+                st.write(f"  Course: {course_name}")
+                st.write(f"  Location: {location}")
+                st.write(f"  Date: {date_range}")
+            
+            # Extract city and state from location line
+            city = None
+            state = default_state
+            
+            location_match = re.search(r'(.*?),\s+([A-Z]{2})$', location)
+            if location_match:
+                city = location_match.group(1).strip()
+                state = location_match.group(2).strip()
+            
+            # Extract date
+            date_value = extract_date(date_range, month_map, default_year)
+            
+            # If date extraction failed, try fallback methods
+            if not date_value:
+                date_value = fallback_date_extraction(date_range, lines, i, month_map, default_year, tournaments)
+            
+            # Only proceed if we have valid data for a tournament
+            if tournament_name and course_name:
+                # Determine category and gender from tournament name
+                category, gender = determine_tournament_type(tournament_name)
+                
+                # Create tournament entry
+                tournament = {
+                    "Date": date_value,
+                    "Name": tournament_name,
+                    "Course": course_name,
+                    "Category": category,
+                    "Gender": gender,
+                    "City": city,
+                    "State": state,
+                    "Zip": None
+                }
+                
+                tournaments.append(tournament)
+                
+                # Show success messages
+                if len(tournaments) <= 10 or len(tournaments) % 20 == 0:
+                    st.write(f"✓ Added tournament: {tournament_name}")
+            else:
+                st.write(f"❌ Skipping incomplete data at block {i//4 + 1}")
+        
+        except Exception as e:
+            st.write(f"❌ Error processing 4-line block at index {i}: {str(e)}")
+
+
+def process_5line_format(lines, month_map, default_year, default_state, tournaments, pattern_switch_index):
+    """
+    Process tournament data in 5-line format
+    """
+    import re
+    import streamlit as st
+    
+    st.write(f"Processing with 5-line format: {len(lines) // 5} blocks")
+    block_count = 0
+    
+    for i in range(0, len(lines) - 4, 5):
+        try:
+            block_count += 1
+            # Determine if this block uses the original or switched pattern
+            using_pattern_b = (pattern_switch_index >= 0 and i >= pattern_switch_index)
+            
+            # In Pattern A (original):
+            # Line 1: Course Name
+            # Line 2: Tournament Name
+            # Line 3: Course Name (repeated)
+            # Line 4: City, State
+            # Line 5: Date Range
+            
+            # In Pattern B (switched):
+            # Line 1: Tournament Name
+            # Line 2: Course Name
+            # Line 3: Tournament Name (repeated) or unused
+            # Line 4: City, State
+            # Line 5: Date Range
+            
+            if using_pattern_b:
+                tournament_name = lines[i]
+                course_name = lines[i+1]
+                unused = lines[i+2]  # Not used, but keep for consistency
+                location = lines[i+3]
+                date_range = lines[i+4]
+            else:
+                course_name = lines[i]
+                tournament_name = lines[i+1]
+                unused = lines[i+2]  # Course repeated, not needed
+                location = lines[i+3]
+                date_range = lines[i+4]
+            
+            # Debug the current block
+            if i < 30 or i % 50 == 0 or using_pattern_b and i < pattern_switch_index + 20:
+                st.write(f"Processing 5-line block {block_count} {'(Pattern B)' if using_pattern_b else '(Pattern A)'}:")
+                st.write(f"  Line 1: {lines[i]}")
+                st.write(f"  Line 2: {lines[i+1]}")
+                st.write(f"  Line 3: {lines[i+2]}")
+                st.write(f"  Line 4: {location}")
+                st.write(f"  Line 5: {date_range}")
+            
+            # Extract city and state from location line
+            city = None
+            state = default_state
+            
+            location_match = re.search(r'(.*?),\s+([A-Z]{2})$', location)
+            if location_match:
+                city = location_match.group(1).strip()
+                state = location_match.group(2).strip()
+            
+            # Extract date
+            date_value = extract_date(date_range, month_map, default_year)
+            
+            # If date extraction failed, try fallback methods
+            if not date_value:
+                date_value = fallback_date_extraction(date_range, lines, i, month_map, default_year, tournaments)
+            
+            # Only proceed if we have valid data for a tournament
+            if tournament_name and course_name:
+                # Determine category and gender from tournament name
+                category, gender = determine_tournament_type(tournament_name)
+                
+                # Create tournament entry
+                tournament = {
+                    "Date": date_value,
+                    "Name": tournament_name,
+                    "Course": course_name,
+                    "Category": category,
+                    "Gender": gender,
+                    "City": city,
+                    "State": state,
+                    "Zip": None
+                }
+                
+                tournaments.append(tournament)
+                
+                # Show success messages
+                if len(tournaments) <= 10 or len(tournaments) % 20 == 0:
+                    st.write(f"✓ Added tournament: {tournament_name}")
+            else:
+                st.write(f"❌ Skipping incomplete data at block {block_count}")
+        
+        except Exception as e:
+            st.write(f"❌ Error processing 5-line block at index {i}: {str(e)}")
+
 
 def extract_date(date_range, month_map, default_year):
     """Extract date from a date range string using multiple pattern matching strategies."""
@@ -1140,10 +1215,11 @@ def extract_date(date_range, month_map, default_year):
             
     return date_value
 
+
 def fallback_date_extraction(date_range, lines, current_idx, month_map, default_year, tournaments):
     """Fallback methods for date extraction when primary patterns fail."""
     import re
-    st = __import__('streamlit')
+    import streamlit as st
     
     # First fallback: check adjacent lines for dates
     for fallback_line in [date_range, 
@@ -1168,10 +1244,14 @@ def fallback_date_extraction(date_range, lines, current_idx, month_map, default_
         st.write(f"  Using previous tournament's date: {date_value}")
         return date_value
     else:
-        # Last resort: use default year, first month, first day
-        date_value = f"{default_year}-01-01"
+        # Last resort: use default year, current month, first day
+        # Improved to use current month
+        import datetime
+        current_month = datetime.datetime.now().month
+        date_value = f"{default_year}-{str(current_month).zfill(2)}-01"
         st.write(f"  Using default date: {date_value}")
         return date_value
+
 
 def determine_tournament_type(tournament_name):
     """Determine category and gender based on tournament name."""
@@ -1182,57 +1262,47 @@ def determine_tournament_type(tournament_name):
     gender = "Men's"
     
     # Specific category detection
-    if "u.s. open" in name_lower and "qualifier" in name_lower and "senior" not in name_lower:
-        category = "Qualifier"
-        gender = "Men's"
-    elif "u.s. senior open" in name_lower or "senior open" in name_lower:
-        category = "Seniors"
-        gender = "Men's"
-    elif "u.s. women's open" in name_lower:
-        category = "Qualifier"
+    if any(word in name_lower for word in ["women", "ladies", "women's", "girl", "girls'"]):
         gender = "Women's"
+        
+        if "junior" in name_lower or "girls" in name_lower:
+            category = "Junior's"
+        elif "amateur" in name_lower:
+            category = "Amateur"
+        elif "senior" in name_lower:
+            category = "Seniors"
+        elif "mid-amateur" in name_lower:
+            category = "Mid-Amateur"
+        else:
+            category = "Women's"
+    
+    # Men's categories
+    elif "u.s. open" in name_lower and "qualifier" in name_lower and "senior" not in name_lower:
+        category = "Qualifier"
+    elif "senior open" in name_lower:
+        category = "Seniors"
     elif "mid-amateur" in name_lower or "mid amateur" in name_lower:
         category = "Mid-Amateur"
-        gender = "Men's"
     elif "match play" in name_lower:
         category = "Match Play"
-        gender = "Men's"
-    elif "senior" in name_lower and "women" not in name_lower:
+    elif "senior" in name_lower:
         category = "Seniors"
-        gender = "Men's"
     elif "super senior" in name_lower:
         category = "Super Senior"
-        gender = "Men's"
-    elif "junior" in name_lower and "girls" not in name_lower and "boys" in name_lower:
+    elif "junior" in name_lower or "boys" in name_lower:
         category = "Junior's"
-        gender = "Men's"
-    elif "junior boys" in name_lower or "boys junior" in name_lower or "boys'" in name_lower:
-        category = "Junior's"
-        gender = "Men's"
-    elif "junior girls" in name_lower or "girls junior" in name_lower or "girls'" in name_lower:
-        category = "Junior's"
-        gender = "Women's"
-    elif "women" in name_lower or "ladies" in name_lower or "women's" in name_lower:
-        category = "Women's"
-        gender = "Women's"
-    elif "girls" in name_lower:
-        category = "Junior's"
-        gender = "Women's"
-    elif "amateur" in name_lower and "mid-amateur" not in name_lower:
+    elif "amateur" in name_lower:
         category = "Amateur"
-        gender = "Men's"
     elif "four-ball" in name_lower:
         category = "Four-Ball"
-        gender = "Men's"
     elif "father-son" in name_lower or "father & son" in name_lower:
         category = "Father & Son"
         gender = "Mixed"
-    elif "parent-child" in name_lower:
+    elif "parent-child" in name_lower or "family" in name_lower or "mixed team" in name_lower:
         category = "Parent & Child"
         gender = "Mixed"
     
     return category, gender
-
 
 def parse_golf_genius_format(text, default_year="2025", default_state=None):
     """
