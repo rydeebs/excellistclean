@@ -3707,7 +3707,176 @@ def parse_course_tournament_format(text, year="2025", default_state=None):
         # Return empty DataFrame with required columns
         st.write("Course-Tournament parser: NO tournaments found")
         return pd.DataFrame(columns=["Date", "Name", "Course", "Category", "Gender", "City", "State", "Zip"])
+def parse_golf_genius_format(text, default_year="2025", default_state=None):
+    """
+    Parser for Golf Genius format with "View" lines and tournament details.
     
+    Format:
+    Tournament Name
+    View
+    Date
+    (optional) Next Round: Date
+    Course Name
+    (optional) OPEN/CLOSED/etc.
+    (optional) closes on
+    (optional) DAY, MONTH DATE
+    (optional) TIME TIMEZONE
+    
+    Returns a DataFrame with tournament data.
+    """
+    import re
+    import pandas as pd
+    
+    # Month mapping
+    month_map = {
+        'JAN': '01', 'FEB': '02', 'MAR': '03', 'APR': '04', 
+        'MAY': '05', 'JUN': '06', 'JUL': '07', 'AUG': '08',
+        'SEP': '09', 'OCT': '10', 'NOV': '11', 'DEC': '12',
+        'Jan': '01', 'Feb': '02', 'Mar': '03', 'Apr': '04', 
+        'May': '05', 'Jun': '06', 'Jul': '07', 'Aug': '08',
+        'Sep': '09', 'Oct': '10', 'Nov': '11', 'Dec': '12'
+    }
+    
+    # Process the lines
+    lines = [line.strip() for line in text.split('\n') if line.strip()]
+    
+    tournaments = []
+    i = 0
+    
+    # Print the first 15 lines for debugging
+    st.write("First 15 lines for debugging (Golf Genius format):")
+    for j in range(min(15, len(lines))):
+        st.write(f"Line {j+1}: '{lines[j]}'")
+    
+    # Process the file
+    while i < len(lines):
+        try:
+            # Look for "View" lines - they indicate a tournament
+            if i + 1 < len(lines) and lines[i+1] == "View":
+                tournament_name = lines[i]  # Line before "View"
+                i += 2  # Skip over "View" line
+                
+                # Next line should be date
+                date_line = lines[i] if i < len(lines) else ""
+                i += 1
+                
+                # Skip "Next Round" line if present
+                if i < len(lines) and lines[i].startswith("Next Round:"):
+                    i += 1
+                
+                # Now we should be at the course name
+                course_name = lines[i] if i < len(lines) else ""
+                i += 1
+                
+                # Skip status lines (OPEN, CLOSED, etc.)
+                while i < len(lines) and (lines[i] in ["OPEN", "CLOSED", "REGISTRATION OPEN"] or 
+                                         lines[i].startswith("closes on") or
+                                         re.match(r'^[A-Z]{3},\s+[A-Z]{3}', lines[i]) or
+                                         re.match(r'^\d{1,2}:\d{2}\s+[AP]M', lines[i])):
+                    i += 1
+                
+                # Extract date
+                date_value = None
+                # Try different date formats
+                date_match = re.search(r'(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun),\s+([A-Za-z]{3})\s+(\d{1,2})(?:\s*-\s*[A-Za-z,\s\d]+)?,\s+(\d{4})', date_line)
+                
+                if date_match:
+                    month_abbr = date_match.group(1)
+                    day = date_match.group(2)
+                    year = date_match.group(3)
+                    
+                    # Convert month name to number
+                    month = month_map.get(month_abbr, '01')
+                    
+                    # Format date
+                    date_value = f"{year}-{month}-{day.zfill(2)}"
+                else:
+                    # Try date range format
+                    range_match = re.search(r'(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun),\s+([A-Za-z]{3})\s+(\d{1,2})\s*-\s*(?:[A-Za-z,\s]+),\s+(\d{4})', date_line)
+                    if range_match:
+                        month_abbr = range_match.group(1)
+                        day = range_match.group(2)
+                        year = range_match.group(3)
+                        
+                        # Convert month name to number
+                        month = month_map.get(month_abbr, '01')
+                        
+                        # Format date
+                        date_value = f"{year}-{month}-{day.zfill(2)}"
+                
+                # If we have valid core data, proceed
+                if date_value and tournament_name and course_name:
+                    # Determine category and gender
+                    name_lower = tournament_name.lower()
+                    category = "Men's"  # Default
+                    gender = "Men's"    # Default
+                    
+                    # Category detection
+                    if "mid-amateur" in name_lower:
+                        category = "Mid-Amateur"
+                    elif "senior" in name_lower and "women" in name_lower:
+                        category = "Seniors"
+                        gender = "Women's"
+                    elif "senior" in name_lower:
+                        category = "Seniors"
+                    elif "junior" in name_lower and "girls" in name_lower:
+                        category = "Junior's"
+                        gender = "Women's"
+                    elif "junior" in name_lower and "boys" in name_lower:
+                        category = "Junior's"
+                    elif "amateur" in name_lower and "women" in name_lower:
+                        category = "Amateur"
+                        gender = "Women's"
+                    elif "amateur" in name_lower:
+                        category = "Amateur"
+                    elif "four-ball" in name_lower:
+                        category = "Four-Ball"
+                    elif "women" in name_lower or "ladies" in name_lower:
+                        category = "Women's"
+                        gender = "Women's"
+                    elif "championship" in name_lower:
+                        category = "Championship"
+                    
+                    # Create tournament entry
+                    tournament = {
+                        "Date": date_value,
+                        "Name": tournament_name.strip(),
+                        "Course": course_name.strip(),
+                        "Category": category,
+                        "Gender": gender,
+                        "City": None,      # No city info in this format
+                        "State": default_state,
+                        "Zip": None
+                    }
+                    
+                    # Add to results
+                    tournaments.append(tournament)
+                    st.write(f"✓ Added tournament: {tournament_name}")
+            else:
+                # Not a tournament start, move to next line
+                i += 1
+        except Exception as e:
+            st.write(f"⚠ Error processing line {i+1}: {str(e)}")
+            i += 1  # Move forward in case of error
+    
+    # Convert to DataFrame - with specific column ordering
+    if tournaments:
+        st.write(f"Golf Genius Parser: Found {len(tournaments)} tournaments")
+        df = pd.DataFrame(tournaments)
+        
+        # Ensure specific column order
+        columns = ["Date", "Name", "Course", "Category", "Gender", "City", "State", "Zip"]
+        for col in columns:
+            if col not in df.columns:
+                df[col] = None
+        
+        # Return DataFrame with defined column order
+        return df[columns]
+    else:
+        # Return empty DataFrame with required columns
+        st.write("Golf Genius Parser: No tournaments found")
+        return pd.DataFrame(columns=["Date", "Name", "Course", "Category", "Gender", "City", "State", "Zip"])
+
 def parse_day_month_tournament_format(text, year="2025", default_state=None):
     """
     Parser for format with this pattern:
