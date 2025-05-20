@@ -194,8 +194,6 @@ def parse_status_based_format(text):
     Start Date - End Date
     [optional] Next Round info
     Course
-    
-    This works for any state, not just Arizona.
     """
     # Split the text into lines and remove empty lines
     lines = [line.strip() for line in text.split('\n') if line.strip()]
@@ -247,73 +245,15 @@ def parse_status_based_format(text):
                 # Skip "Next Round" line
                 if i < len(lines) and "Next Round:" in lines[i]:
                     i += 1
-                    
-                # Extract course information
+                
+                # Extract state from context or default
+                state_name = None
                 if i < len(lines):
-                    course_line = lines[i]
-                    # If this line looks like a date and we don't have a date yet, use it as date
-                    if date_value is None and re.search(r'[A-Za-z]{3},\s+[A-Za-z]{3}\s+\d{1,2}', course_line):
-                        date_parts = course_line.split('-')[0].strip()
-                        tournament_data['Date'] = ultra_simple_date_extractor(date_parts, year)
-                    else:
-                        tournament_data['Course'] = course_line.strip()
-                    i += 1
+                    state_match = re.search(r',\s+([A-Z]{2})$', lines[i])
+                    if state_match:
+                        state_name = state_match.group(1)
                 
-                # Set default category based on tournament name
-                name = tournament_data['Name']
-                if name:
-                    if "Amateur" in name:
-                        tournament_data['Category'] = "Amateur"
-                    elif "Senior" in name or "Mid-Amateur" in name:
-                        tournament_data['Category'] = "Seniors"
-                    elif "Women" in name or "Ladies" in name:
-                        tournament_data['Category'] = "Women's"
-                    elif "Junior" in name or "Boys'" in name or "Girls'" in name:
-                        tournament_data['Category'] = "Junior's"
-                    elif any(x in name for x in ["Father", "Son", "Parent", "Child", "Mother", "Daughter", "Family", "Mixed", "Stix"]):
-                        tournament_data['Category'] = "Mixed/Couples"
-                    elif "EmpowHER" in name:  # Special case for the EmpowHER Classic
-                        tournament_data['Category'] = "Women's"
-                    else:
-                        tournament_data['Category'] = "Men's"  # Default category
-                
-                # Set default state if provided
-                if default_state:
-                    tournament_data['State'] = default_state
-                    
-                # Try to extract state from tournament name
-                state_match = re.search(r'\b([A-Z]{2})\b', name) if name else None
-                state_name_match = re.search(r'(\b(?:Arizona|Alabama|Alaska|Arkansas|California|Colorado|Connecticut|Delaware|Florida|Georgia|Hawaii|Idaho|Illinois|Indiana|Iowa|Kansas|Kentucky|Louisiana|Maine|Maryland|Massachusetts|Michigan|Minnesota|Mississippi|Missouri|Montana|Nebraska|Nevada|New\s+Hampshire|New\s+Jersey|New\s+Mexico|New\s+York|North\s+Carolina|North\s+Dakota|Ohio|Oklahoma|Oregon|Pennsylvania|Rhode\s+Island|South\s+Carolina|South\s+Dakota|Tennessee|Texas|Utah|Vermont|Virginia|Washington|West\s+Virginia|Wisconsin|Wyoming)\b)', name) if name else None
-                
-                if state_match:
-                    potential_state = state_match.group(1)
-                    # Verify it's a valid state code
-                    valid_states = ["AL", "AK", "AZ", "AR", "CA", "CO", "CT", "DE", "FL", "GA", 
-                                   "HI", "ID", "IL", "IN", "IA", "KS", "KY", "LA", "ME", "MD", 
-                                   "MA", "MI", "MN", "MS", "MO", "MT", "NE", "NV", "NH", "NJ", 
-                                   "NM", "NY", "NC", "ND", "OH", "OK", "OR", "PA", "RI", "SC", 
-                                   "SD", "TN", "TX", "UT", "VT", "VA", "WA", "WV", "WI", "WY", "DC"]
-                    if potential_state in valid_states:
-                        tournament_data['State'] = potential_state
-                elif state_name_match:
-                    # Convert state name to code
-                    state_name = state_name_match.group(1)
-    state_dict = {
-        'ALABAMA': 'AL', 'ALASKA': 'AK', 'ARIZONA': 'AZ', 'ARKANSAS': 'AR',
-        'CALIFORNIA': 'CA', 'COLORADO': 'CO', 'CONNECTICUT': 'CT', 'DELAWARE': 'DE',
-        'FLORIDA': 'FL', 'GEORGIA': 'GA', 'HAWAII': 'HI', 'IDAHO': 'ID',
-        'ILLINOIS': 'IL', 'INDIANA': 'IN', 'IOWA': 'IA', 'KANSAS': 'KS',
-        'KENTUCKY': 'KY', 'LOUISIANA': 'LA', 'MAINE': 'ME', 'MARYLAND': 'MD',
-        'MASSACHUSETTS': 'MA', 'MICHIGAN': 'MI', 'MINNESOTA': 'MN', 'MISSISSIPPI': 'MS',
-        'MISSOURI': 'MO', 'MONTANA': 'MT', 'NEBRASKA': 'NE', 'NEVADA': 'NV',
-        'NEW HAMPSHIRE': 'NH', 'NEW JERSEY': 'NJ', 'NEW MEXICO': 'NM', 'NEW YORK': 'NY',
-        'NORTH CAROLINA': 'NC', 'NORTH DAKOTA': 'ND', 'OHIO': 'OH', 'OKLAHOMA': 'OK',
-        'OREGON': 'OR', 'PENNSYLVANIA': 'PA', 'RHODE ISLAND': 'RI', 'SOUTH CAROLINA': 'SC',
-        'SOUTH DAKOTA': 'SD', 'TENNESSEE': 'TN', 'TEXAS': 'TX', 'UTAH': 'UT',
-        'VERMONT': 'VT', 'VIRGINIA': 'VA', 'WASHINGTON': 'WA', 'WEST VIRGINIA': 'WV',
-        'WISCONSIN': 'WI', 'WYOMING': 'WY', 'DISTRICT OF COLUMBIA': 'DC'
-    }
-                    tournament_data['State'] = state_dict.get(state_name.upper(), None)
+                tournament_data['State'] = state_dict.get(state_name.upper(), None)
                 
                 # Add tournament to the list if it has at least a name
                 if tournament_data['Name']:
