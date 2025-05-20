@@ -804,29 +804,40 @@ def parse_amateur_golf_format_improved(text, default_year="2025", default_state=
     
     # First, check if this is the 5-line repeated course format
     is_repeated_course_format = False
-    if len(lines) >= 10:  # Need at least 2 tournaments to detect
-        # Check if every 5th line seems to be a date
-        date_pattern_matches = 0
-        for i in range(4, len(lines), 5):
-            if i < len(lines) and re.search(r'(January|February|March|April|May|June|July|August|September|October|November|December|Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d{1,2}', lines[i]):
-                date_pattern_matches += 1
+    if len(lines) >= 5:  # Need at least 5 lines for one complete entry
+        # Check how many potential 5-line blocks we have
+        potential_blocks = len(lines) // 5
         
-        # Check if at least half of the potential date lines match
-        potential_date_lines = (len(lines) - 4) // 5
-        if date_pattern_matches >= potential_date_lines // 2 and potential_date_lines > 0:
-            # Also check if the 3rd line repeats the 1st line in at least one entry
-            for i in range(0, len(lines)-4, 5):
-                if lines[i] == lines[i+2] or (len(lines[i]) > 5 and len(lines[i+2]) > 5 and 
-                                             (lines[i] in lines[i+2] or lines[i+2] in lines[i])):
-                    is_repeated_course_format = True
-                    st.write("Detected 5-line repeated course format")
+        # Check if lines are divisible by 5 or close to it
+        if len(lines) % 5 == 0 or (len(lines) % 5 < 3):  # Allow for incomplete final tournament
+            repeated_course_count = 0
+            date_pattern_matches = 0
+            
+            # Check each potential tournament block
+            for i in range(0, len(lines) - 4, 5):
+                if i + 4 >= len(lines):
                     break
+                    
+                # Check if the 1st and 3rd lines (course names) match or are very similar
+                if lines[i] == lines[i+2] or (
+                   len(lines[i]) > 5 and len(lines[i+2]) > 5 and 
+                   (lines[i] in lines[i+2] or lines[i+2] in lines[i])):
+                    repeated_course_count += 1
+                
+                # Check if the 5th line looks like a date range
+                if re.search(r'(January|February|March|April|May|June|July|August|September|October|November|December|Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d{1,2}', lines[i+4]):
+                    date_pattern_matches += 1
+            
+            # If we have a significant number of matches, consider it the repeated course format
+            if repeated_course_count > 0 and date_pattern_matches > 0:
+                is_repeated_course_format = True
+                st.write(f"Detected 5-line repeated course format with {repeated_course_count} course matches and {date_pattern_matches} date matches")
     
     # If confirmed as repeated course format, process it
     if is_repeated_course_format:
-        # Process in chunks of 5 lines
-        num_chunks = len(lines) // 5
-        for i in range(num_chunks):
+        # Process in blocks of 5 lines
+        num_blocks = (len(lines) // 5) + (1 if len(lines) % 5 > 0 else 0)
+        for i in range(num_blocks):
             start_idx = i * 5
             
             # If we don't have enough lines for a complete entry, skip
@@ -850,6 +861,8 @@ def parse_amateur_golf_format_improved(text, default_year="2025", default_state=
             
             # Extract date from date range
             date_value = None
+            
+            # Format: Month DD, YYYY - Month DD, YYYY
             date_match = re.search(r'([A-Za-z]+)\s+(\d{1,2}),?\s+(\d{4})', date_range)
             date_range_match = re.search(r'([A-Za-z]+)\s+(\d{1,2})\s*-\s*(?:[A-Za-z]+\s+)?(?:\d{1,2})?,\s*(\d{4})', date_range)
             
@@ -912,11 +925,21 @@ def parse_amateur_golf_format_improved(text, default_year="2025", default_state=
                     category = "Amateur"
                 elif "open" in name_lower:
                     category = "Open"
-                elif "four-ball" in name_lower:
+                elif "four-ball" in name_lower or "four ball" in name_lower:
                     category = "Four-Ball"
                 elif "father-son" in name_lower or "parent-child" in name_lower:
                     category = "Mixed Family"
                     gender = "Mixed"
+                elif "invitational" in name_lower:
+                    if "senior" in name_lower:
+                        category = "Seniors"
+                    else:
+                        category = "Invitational"
+                elif "classic" in name_lower:
+                    if "veterans" in name_lower:
+                        category = "Veterans"
+                    else:
+                        category = "Classic"
                 elif "women" in name_lower or "ladies" in name_lower:
                     category = "Women's"
                     gender = "Women's"
@@ -1338,7 +1361,7 @@ def parse_amateur_golf_format_improved(text, default_year="2025", default_state=
         # Return empty DataFrame with required columns
         st.write("Amateur Golf parser: No tournaments found")
         return pd.DataFrame(columns=["Date", "Name", "Course", "Category", "Gender", "City", "State", "Zip"])
-
+    
 def parse_golf_genius_format(text, default_year="2025", default_state=None):
     """
     Specialized parser for Golf Genius schedule format.
