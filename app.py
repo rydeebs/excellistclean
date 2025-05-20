@@ -3997,6 +3997,200 @@ def parse_tournament_text(text):
         # If no specific format is detected, try the most generic parser
         st.write("No specific format detected, trying generic parser")
         return parse_status_based_format(text)  # Use status-based format as fallback
+    
+def simple_logical_parser(text, default_year="2025", default_state=None):
+    """
+    A simple parser that follows basic logic to extract golf tournament data.
+    
+    Specifically handles the pattern:
+    Line 1: Course Name (e.g., "Musgrove Mill Golf Club")
+    Line 2: Tournament Name (e.g., "South Carolina Four-Ball Championship")
+    Line 3: Course Name repeated
+    Line 4: City, State (e.g., "Clinton, SC")
+    Line 5: Date Range (e.g., "May 21, 2025 - May 25, 2025")
+    
+    Returns DataFrame with columns: Date, Name, Course, Category, Gender, City, State, Zip
+    """
+    import re
+    import pandas as pd
+    
+    # Month mapping
+    month_map = {
+        'Jan': '01', 'January': '01',
+        'Feb': '02', 'February': '02',
+        'Mar': '03', 'March': '03',
+        'Apr': '04', 'April': '04',
+        'May': '05',
+        'Jun': '06', 'June': '06',
+        'Jul': '07', 'July': '07',
+        'Aug': '08', 'August': '08',
+        'Sep': '09', 'Sept': '09', 'September': '09',
+        'Oct': '10', 'October': '10',
+        'Nov': '11', 'November': '11',
+        'Dec': '12', 'December': '12'
+    }
+    
+    # Prepare lines and remove empty ones
+    lines = [line.strip() for line in text.split('\n') if line.strip()]
+    
+    # Print the first 15 lines to debug
+    st.write("First 15 lines for debugging:")
+    for i in range(min(15, len(lines))):
+        st.write(f"Line {i+1}: {lines[i]}")
+    
+    # Create result list
+    tournaments = []
+    
+    # Process in 5-line blocks
+    i = 0
+    while i + 4 < len(lines):
+        # Extract the 5 lines of this block
+        try:
+            # Define roles for each line (explicitly)
+            course_line = lines[i]
+            tournament_line = lines[i+1]
+            course_repeat_line = lines[i+2]  # This should repeat the course
+            location_line = lines[i+3]
+            date_line = lines[i+4]
+            
+            # Debug output for this block
+            st.write(f"Processing block at line {i+1}:")
+            st.write(f"  Course: '{course_line}'")
+            st.write(f"  Tournament: '{tournament_line}'")
+            st.write(f"  Course Repeat: '{course_repeat_line}'")
+            st.write(f"  Location: '{location_line}'")
+            st.write(f"  Date: '{date_line}'")
+            
+            # Validate this block (course should be repeated)
+            if course_line == course_repeat_line:
+                # Extract city and state from location line
+                location_match = re.search(r'(.*?),\s+([A-Z]{2})$', location_line)
+                city = None
+                state = default_state
+                
+                if location_match:
+                    city = location_match.group(1).strip()
+                    state = location_match.group(2).strip()
+                
+                # Extract date
+                date_value = None
+                # Try different date formats
+                date_match = re.search(r'([A-Za-z]+)\s+(\d{1,2}),?\s+(\d{4})', date_line)
+                
+                if date_match:
+                    month_name = date_match.group(1)
+                    day = date_match.group(2)
+                    year = date_match.group(3)
+                    
+                    # Convert month name to number
+                    month = month_map.get(month_name[:3], '01')
+                    
+                    # Format date
+                    date_value = f"{year}-{month}-{day.zfill(2)}"
+                else:
+                    # Try date range format
+                    range_match = re.search(r'([A-Za-z]+)\s+(\d{1,2})\s*-\s*(?:[A-Za-z]+\s+)?(?:\d{1,2})?,\s*(\d{4})', date_line)
+                    if range_match:
+                        month_name = range_match.group(1)
+                        day = range_match.group(2)
+                        year = range_match.group(3)
+                        
+                        # Convert month name to number
+                        month = month_map.get(month_name[:3], '01')
+                        
+                        # Format date
+                        date_value = f"{year}-{month}-{day.zfill(2)}"
+                
+                # If we have valid core data, proceed
+                if date_value:
+                    # Determine category and gender
+                    name_lower = tournament_line.lower()
+                    category = "Men's"  # Default
+                    gender = "Men's"    # Default
+                    
+                    # Category detection
+                    if "mid-amateur" in name_lower or "mid amateur" in name_lower:
+                        category = "Mid-Amateur"
+                    elif "match play" in name_lower:
+                        category = "Match Play"
+                    elif "senior" in name_lower and "super" not in name_lower and "women" not in name_lower:
+                        category = "Seniors"
+                    elif "super senior" in name_lower or "super-senior" in name_lower:
+                        category = "Super Senior"
+                    elif "junior" in name_lower and "girls" not in name_lower and "boys" not in name_lower:
+                        category = "Junior's"
+                    elif "junior girls" in name_lower or "girls junior" in name_lower or "girls'" in name_lower:
+                        category = "Junior's"
+                        gender = "Women's"
+                    elif "junior boys" in name_lower or "boys junior" in name_lower or "boys'" in name_lower:
+                        category = "Junior's"
+                    elif "amateur" in name_lower and "mid-amateur" not in name_lower:
+                        category = "Amateur"
+                    elif "open" in name_lower:
+                        category = "Open"
+                    elif "four-ball" in name_lower or "four ball" in name_lower:
+                        category = "Four-Ball"
+                    elif "father-son" in name_lower or "parent-child" in name_lower:
+                        category = "Mixed Family"
+                        gender = "Mixed"
+                    elif "invitational" in name_lower:
+                        if "senior" in name_lower:
+                            category = "Seniors"
+                        else:
+                            category = "Invitational"
+                    elif "classic" in name_lower:
+                        if "veterans" in name_lower:
+                            category = "Veterans"
+                        else:
+                            category = "Classic"
+                    elif "championship" in name_lower:
+                        category = "Championship"
+                    elif "women" in name_lower or "ladies" in name_lower:
+                        category = "Women's"
+                        gender = "Women's"
+                    
+                    # Create tournament entry
+                    tournament = {
+                        "Date": date_value,
+                        "Name": tournament_line.strip(),     # Line 2
+                        "Course": course_line.strip(),       # Line 1
+                        "Category": category,
+                        "Gender": gender,
+                        "City": city,                      # Extracted from line 4
+                        "State": state,                    # Extracted from line 4
+                        "Zip": None
+                    }
+                    
+                    # Add to results
+                    tournaments.append(tournament)
+                    st.write(f"✓ Added tournament: {tournament_line}")
+                else:
+                    st.write(f"⚠ Skipping block at line {i+1} - invalid date format: '{date_line}'")
+            else:
+                st.write(f"⚠ Skipping block at line {i+1} - course not repeated: '{course_line}' vs '{course_repeat_line}'")
+        except Exception as e:
+            st.write(f"⚠ Error processing block at line {i+1}: {str(e)}")
+        
+        # Move to next block of 5 lines
+        i += 5
+    
+    # Convert to DataFrame - with specific column ordering
+    if tournaments:
+        st.write(f"Simple Logical Parser: Found {len(tournaments)} tournaments")
+        df = pd.DataFrame(tournaments)
+        
+        # Ensure specific column order
+        columns = ["Date", "Name", "Course", "Category", "Gender", "City", "State", "Zip"]
+        for col in columns:
+            if col not in df.columns:
+                df[col] = None
+        
+        # Return DataFrame with defined column order
+        return df[columns]
+    else:
+        # Return empty DataFrame with required columns
+        st.write("Simple Logical Parser: No tournaments found")
+        return pd.DataFrame(columns=["Date", "Name", "Course", "Category", "Gender", "City", "State", "Zip"])
 
 # Define the Streamlit app
 st.title("NNGA Tournament Parser")
@@ -4046,69 +4240,79 @@ def ensure_column_order(df):
 if st.button("Process Tournament Data"):
     if tournament_text:
         try:
-            # Try to detect Golf Genius format first (has "View" lines and a specific pattern)
-            if "View" in tournament_text and ("OPEN" in tournament_text or "OPENS" in tournament_text or "closes on" in tournament_text):
-                st.write("Detected Golf Genius format - using specialized parser")
-                df = parse_golf_genius_format(tournament_text, year, default_state)
+            # First, try our simple logical parser for the specific 5-line format
+            st.write("Trying simple logical parser first...")
+            df = simple_logical_parser(tournament_text, year, default_state)
             
-            # If that didn't work, try other formats
-            elif "View" in tournament_text:
-                st.write("Detected NNGA format - using specialized parser")
-                # Use whichever NNGA parser function exists in your code
-                if 'parse_usga_qualifier_format' in globals():
-                    df = parse_usga_qualifier_format(tournament_text)
-                elif 'parse_usga_view_format' in globals():
-                    df = parse_usga_view_format(tournament_text)
-                else:
-                    # Fallback to standard parsing
-                    st.write("No specialized NNGA parser found, using standard format detection")
-                    df = parse_tournament_text(tournament_text)
-            
-            # Try the improved unified Amateur Golf format parser
-            elif len(tournament_text.split('\n')) >= 10:  # Need at least 10 lines for pattern detection
-                df = parse_amateur_golf_format_improved(tournament_text, year, default_state)
+            if not df.empty:
+                st.write(f"Successfully parsed {len(df)} tournaments using simple logical parser")
+            else:
+                # If the simple parser doesn't work, fall back to other parsers
+                st.write("Simple parser didn't find any tournaments. Trying other parsers...")
                 
-                if not df.empty:
-                    st.write(f"Successfully parsed {len(df)} tournaments using improved Amateur Golf format parser")
-                # If Amateur Golf parser didn't work, try other formats
-                else:
-                    # Check for monthly entries format with month headers
-                    if re.search(r'Entry Deadline:|Entries Closed|Entries Open:', tournament_text):
-                        st.write("Detected Monthly-Entries format - using specialized parser")
-                        df = parse_monthly_entries_format(tournament_text, year, default_state)
+                # Try to detect Golf Genius format first (has "View" lines and a specific pattern)
+                if "View" in tournament_text and ("OPEN" in tournament_text or "OPENS" in tournament_text or "closes on" in tournament_text):
+                    st.write("Detected Golf Genius format - using specialized parser")
+                    df = parse_golf_genius_format(tournament_text, year, default_state)
+                
+                # If that didn't work, try other formats
+                elif "View" in tournament_text:
+                    st.write("Detected NNGA format - using specialized parser")
+                    # Use whichever NNGA parser function exists in your code
+                    if 'parse_usga_qualifier_format' in globals():
+                        df = parse_usga_qualifier_format(tournament_text)
+                    elif 'parse_usga_view_format' in globals():
+                        df = parse_usga_view_format(tournament_text)
+                    else:
+                        # Fallback to standard parsing
+                        st.write("No specialized NNGA parser found, using standard format detection")
+                        df = parse_tournament_text(tournament_text)
+                
+                # Try the improved unified Amateur Golf format parser
+                elif len(tournament_text.split('\n')) >= 10:  # Need at least 10 lines for pattern detection
+                    df = parse_amateur_golf_format_improved(tournament_text, year, default_state)
                     
-                    # Check for day-month-tournament pattern
-                    elif any(line.isdigit() and 1 <= int(line) <= 31 for line in tournament_text.split('\n')):
-                        # Split into lines and filter out empty ones
-                        lines = [line.strip() for line in tournament_text.split('\n') if line.strip()]
+                    if not df.empty:
+                        st.write(f"Successfully parsed {len(df)} tournaments using improved Amateur Golf format parser")
+                    # If Amateur Golf parser didn't work, try other formats
+                    else:
+                        # Check for monthly entries format with month headers
+                        if re.search(r'Entry Deadline:|Entries Closed|Entries Open:', tournament_text):
+                            st.write("Detected Monthly-Entries format - using specialized parser")
+                            df = parse_monthly_entries_format(tournament_text, year, default_state)
                         
-                        # Count pattern occurrences: day number followed by month name
-                        month_names = ['Jan', 'January', 'Feb', 'February', 'Mar', 'March', 
-                                     'Apr', 'April', 'May', 'Jun', 'June', 'Jul', 'July', 
-                                     'Aug', 'August', 'Sep', 'September', 'Oct', 'October',
-                                     'Nov', 'November', 'Dec', 'December']
-                        
-                        pattern_count = 0
-                        for i in range(len(lines) - 1):
-                            if (lines[i].isdigit() and 1 <= int(lines[i]) <= 31 and 
-                                i+1 < len(lines) and lines[i+1] in month_names):
-                                pattern_count += 1
-                        
-                        if pattern_count >= 2:
-                            st.write("Detected Day-Month-Tournament format - using specialized parser")
-                            df = parse_day_month_tournament_format(tournament_text, year, default_state)
+                        # Check for day-month-tournament pattern
+                        elif any(line.isdigit() and 1 <= int(line) <= 31 for line in tournament_text.split('\n')):
+                            # Split into lines and filter out empty ones
+                            lines = [line.strip() for line in tournament_text.split('\n') if line.strip()]
+                            
+                            # Count pattern occurrences: day number followed by month name
+                            month_names = ['Jan', 'January', 'Feb', 'February', 'Mar', 'March', 
+                                         'Apr', 'April', 'May', 'Jun', 'June', 'Jul', 'July', 
+                                         'Aug', 'August', 'Sep', 'September', 'Oct', 'October',
+                                         'Nov', 'November', 'Dec', 'December']
+                            
+                            pattern_count = 0
+                            for i in range(len(lines) - 1):
+                                if (lines[i].isdigit() and 1 <= int(lines[i]) <= 31 and 
+                                    i+1 < len(lines) and lines[i+1] in month_names):
+                                    pattern_count += 1
+                            
+                            if pattern_count >= 2:
+                                st.write("Detected Day-Month-Tournament format - using specialized parser")
+                                df = parse_day_month_tournament_format(tournament_text, year, default_state)
+                            else:
+                                # Fall back to standard format detection
+                                st.write("Using standard format detection")
+                                df = parse_tournament_text(tournament_text)
                         else:
-                            # Fall back to standard format detection
+                            # For other formats, use the original format detection and parsing
                             st.write("Using standard format detection")
                             df = parse_tournament_text(tournament_text)
-                    else:
-                        # For other formats, use the original format detection and parsing
-                        st.write("Using standard format detection")
-                        df = parse_tournament_text(tournament_text)
-            else:
-                # Not enough lines for pattern detection, use standard parsing
-                st.write("Using standard format detection")
-                df = parse_tournament_text(tournament_text)
+                else:
+                    # Not enough lines for pattern detection, use standard parsing
+                    st.write("Using standard format detection")
+                    df = parse_tournament_text(tournament_text)
             
             # Check if DataFrame is empty
             if df.empty:
@@ -4116,146 +4320,8 @@ if st.button("Process Tournament Data"):
                 # Create an empty DataFrame with all required columns
                 df = pd.DataFrame(columns=REQUIRED_COLUMNS)
             else:
-                # Post-processing: Special handling for the 5-line format
-                if 'Name' in df.columns and 'Course' in df.columns:
-                    st.write("### Performing post-processing column checks")
-                    
-                    # Get a sample of rows for analysis
-                    sample_size = min(5, len(df))
-                    
-                    # Display what we're working with
-                    st.write("### Sample rows before potential fix:")
-                    for i in range(sample_size):
-                        if i < len(df):
-                            city_val = str(df.iloc[i].get('City', 'N/A')) if 'City' in df.columns and pd.notna(df.iloc[i].get('City')) else 'N/A'
-                            state_val = str(df.iloc[i].get('State', 'N/A')) if 'State' in df.columns and pd.notna(df.iloc[i].get('State')) else 'N/A'
-                            st.write(f"Row {i+1}: Name='{df.iloc[i]['Name']}', Course='{df.iloc[i]['Course']}', City='{city_val}', State='{state_val}'")
-                    
-                    # Check for special formatting issues
-                    
-                    # Issue 1: Check if Name column contains city/state pattern like "City, ST"
-                    name_has_city_state = False
-                    if df['Name'].notna().any():
-                        name_city_state_count = sum(bool(re.search(r',\s+[A-Z]{2}$', str(name))) for name in df['Name'] if pd.notna(name))
-                        if name_city_state_count > 0:
-                            name_has_city_state = True
-                            st.write(f"WARNING: {name_city_state_count} rows have City, State pattern in Name column!")
-                    
-                    # Issue 2: Check if Course column contains tournament-like names (Championship, etc.)
-                    course_has_tournament_keywords = False
-                    tournament_keywords = ["Championship", "Invitational", "Amateur", "Senior", "Classic", "Open", "Four-Ball"]
-                    if df['Course'].notna().any():
-                        course_tournament_count = sum(any(kw in str(course) for kw in tournament_keywords) 
-                                                    for course in df['Course'] if pd.notna(course))
-                        if course_tournament_count > 0:
-                            course_has_tournament_keywords = True
-                            st.write(f"WARNING: {course_tournament_count} rows have tournament keywords in Course column!")
-                    
-                    # Case 1: Location in Name column - this means the real tournament name is missing
-                    if name_has_city_state:
-                        st.write("### FIXING: City, State info incorrectly in Name column")
-                        
-                        # Parse raw text again to get the actual tournament names
-                        actual_tournaments = []
-                        lines = [line.strip() for line in tournament_text.split('\n') if line.strip()]
-                        
-                        # Parse in 5-line blocks
-                        if len(lines) % 5 == 0:
-                            st.write("Re-parsing 5-line blocks to find tournament names...")
-                            
-                            for i in range(0, len(lines), 5):
-                                if i + 4 < len(lines):
-                                    # In our 5-line format, the tournament name should be line 2
-                                    course = lines[i]          # Line 1
-                                    name = lines[i+1]          # Line 2 - Tournament name
-                                    location = lines[i+3]      # Line 4 - City, State
-                                    date_text = lines[i+4]     # Line 5 - Date
-                                    
-                                    st.write(f"Block {i//5 + 1} - Course: '{course}', Name: '{name}', Location: '{location}'")
-                                    
-                                    # Extract city/state from location
-                                    city = None
-                                    state = None
-                                    location_match = re.search(r'(.*?),\s+([A-Z]{2})$', location)
-                                    if location_match:
-                                        city = location_match.group(1).strip()
-                                        state = location_match.group(2).strip()
-                                    
-                                    actual_tournaments.append({
-                                        'Course': course,
-                                        'Name': name,
-                                        'City': city,
-                                        'State': state
-                                    })
-                            
-                            # Now update the main dataframe with the correct names
-                            if len(actual_tournaments) == len(df):
-                                st.write("Updating dataframe with correct tournament names...")
-                                for i in range(len(df)):
-                                    df.at[i, 'Name'] = actual_tournaments[i]['Name']
-                                    # Also ensure City and State are correctly set
-                                    if 'City' in df.columns and 'State' in df.columns:
-                                        if pd.isna(df.at[i, 'City']) or df.at[i, 'City'] == '':
-                                            df.at[i, 'City'] = actual_tournaments[i]['City']
-                                        if pd.isna(df.at[i, 'State']) or df.at[i, 'State'] == '':
-                                            df.at[i, 'State'] = actual_tournaments[i]['State']
-                            else:
-                                st.write(f"WARNING: Count mismatch - {len(actual_tournaments)} found vs {len(df)} in dataframe")
-                                # Still try to extract city/state info from name column
-                                for i in range(len(df)):
-                                    name_value = str(df.iloc[i]['Name']) if pd.notna(df.iloc[i]['Name']) else ""
-                                    city_state_match = re.search(r'(.*?),\s+([A-Z]{2})$', name_value)
-                                    
-                                    if city_state_match:
-                                        city = city_state_match.group(1).strip()
-                                        state = city_state_match.group(2).strip()
-                                        
-                                        # Update City and State columns
-                                        if 'City' in df.columns and 'State' in df.columns:
-                                            df.at[i, 'City'] = city
-                                            df.at[i, 'State'] = state
-                                        
-                                        # Set a placeholder name
-                                        course = str(df.iloc[i]['Course']) if pd.notna(df.iloc[i]['Course']) else ""
-                                        df.at[i, 'Name'] = f"{course} Tournament"
-                        else:
-                            st.write(f"WARNING: Line count not divisible by 5 ({len(lines)} lines)")
-                            # Extract city/state from Name column anyway
-                            for i in range(len(df)):
-                                name_value = str(df.iloc[i]['Name']) if pd.notna(df.iloc[i]['Name']) else ""
-                                city_state_match = re.search(r'(.*?),\s+([A-Z]{2})$', name_value)
-                                
-                                if city_state_match:
-                                    city = city_state_match.group(1).strip()
-                                    state = city_state_match.group(2).strip()
-                                    
-                                    # Update City and State columns
-                                    if 'City' in df.columns and 'State' in df.columns:
-                                        df.at[i, 'City'] = city
-                                        df.at[i, 'State'] = state
-                                    
-                                    # Use a combination of course and city for name
-                                    course = str(df.iloc[i]['Course']) if pd.notna(df.iloc[i]['Course']) else ""
-                                    df.at[i, 'Name'] = f"{course} - {city} Tournament"
-                    
-                    # Case 2: Name and Course are swapped
-                    elif course_has_tournament_keywords:
-                        st.write("### FIXING: Name and Course columns are swapped")
-                        # Swap the columns
-                        temp_name = df['Name'].copy()
-                        df['Name'] = df['Course']
-                        df['Course'] = temp_name
-                    
-                    # Show the results after fixes
-                    st.write("### Sample rows after fix:")
-                    for i in range(sample_size):
-                        if i < len(df):
-                            city_val = str(df.iloc[i].get('City', 'N/A')) if 'City' in df.columns and pd.notna(df.iloc[i].get('City')) else 'N/A'
-                            state_val = str(df.iloc[i].get('State', 'N/A')) if 'State' in df.columns and pd.notna(df.iloc[i].get('State')) else 'N/A'
-                            st.write(f"Row {i+1}: Name='{df.iloc[i]['Name']}', Course='{df.iloc[i]['Course']}', City='{city_val}', State='{state_val}'")
-            
-                # Show detailed information about the raw extracted data for debugging
-                st.write("### Raw Extracted Data (First few rows)")
+                # Show detailed information about the parsed data
+                st.write("### Parsed Tournament Data (First few rows)")
                 display_df = df.head(5).copy()
                 # Convert any complex objects to strings for display
                 for col in display_df.columns:
