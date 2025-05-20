@@ -4124,9 +4124,16 @@ def parse_oga_format(text, default_year="2025", default_state=None):
             # Pattern: Name, Date, Name repeated, Course-City, Event Website
             if lines[i+4] == "Event Website":
                 # This looks like an OGA tournament block
-                tournament_name = lines[i]
-                date_line = lines[i+1]
-                course_city_line = lines[i+3]
+                tournament_name = lines[i]  # First line is name
+                date_line = lines[i+1]      # Second line is date
+                # Third line is repeated name - skip
+                course_city_line = lines[i+3]  # Fourth line is course/city
+                
+                # Debug output
+                st.write(f"Block at line {i+1}:")
+                st.write(f"  Name: '{tournament_name}'")
+                st.write(f"  Date: '{date_line}'")
+                st.write(f"  Course/City: '{course_city_line}'")
                 
                 # Extract date
                 date_value = None
@@ -4172,8 +4179,13 @@ def parse_oga_format(text, default_year="2025", default_state=None):
                     # If no clear separator, use the whole line as course
                     course = course_city_line
                 
+                # CRITICAL FIX: Make sure we're assigning correctly
+                # The name is from the first line, and course is from the fourth line
+                fixed_name = tournament_name  # From line 1
+                fixed_course = course         # Extracted from line 4
+                
                 # Determine category and gender based on tournament name
-                name_lower = tournament_name.lower()
+                name_lower = fixed_name.lower()
                 category = "Men's"  # Default
                 gender = "Men's"    # Default
                 
@@ -4188,6 +4200,10 @@ def parse_oga_format(text, default_year="2025", default_state=None):
                     category = "Championship"
                 elif "qualifier" in name_lower:
                     category = "Qualifier"
+                elif "tournament" in name_lower:
+                    category = "Tournament"
+                elif "series" in name_lower:
+                    category = "Series"
                 
                 # Gender detection
                 if "women" in name_lower or "ladies" in name_lower:
@@ -4196,11 +4212,14 @@ def parse_oga_format(text, default_year="2025", default_state=None):
                     gender = "Mixed"
                 
                 # If we have valid core data, create an entry
-                if date_value and tournament_name and course:
+                if date_value and fixed_name and fixed_course:
+                    # Double check the assignment - explicitly show what we're adding
+                    st.write(f"  ADDING: Name='{fixed_name}', Course='{fixed_course}', City='{city}'")
+                    
                     tournament = {
                         "Date": date_value,
-                        "Name": tournament_name.strip(),
-                        "Course": course,
+                        "Name": fixed_name,
+                        "Course": fixed_course,
                         "Category": category,
                         "Gender": gender,
                         "City": city,
@@ -4209,7 +4228,7 @@ def parse_oga_format(text, default_year="2025", default_state=None):
                     }
                     
                     tournaments.append(tournament)
-                    st.write(f"✓ Added tournament: {tournament_name}")
+                    st.write(f"✓ Added tournament: {fixed_name}")
                 
                 # Move to the next block (skip 5 lines)
                 i += 5
@@ -4219,6 +4238,54 @@ def parse_oga_format(text, default_year="2025", default_state=None):
         except Exception as e:
             st.write(f"⚠ Error processing line {i+1}: {str(e)}")
             i += 1  # Move forward in case of error
+    
+    # Check the column assignments and fix if needed
+    if tournaments:
+        # Make a quick check for column assignment issues
+        # Just for safety, check a few entries to see if names look like courses
+        course_keywords = ["GC", "Golf", "Club", "Country", "Course", "Links", "Hills"]
+        name_keywords = ["Championship", "Amateur", "Tournament", "Open", "Series", "Qualifier"]
+        
+        names_with_course_keywords = 0
+        courses_with_name_keywords = 0
+        
+        # Check the first few entries (up to 3)
+        for i in range(min(3, len(tournaments))):
+            name = tournaments[i]["Name"]
+            course = tournaments[i]["Course"]
+            
+            # Check if name contains course keywords
+            if any(kw in name for kw in course_keywords):
+                names_with_course_keywords += 1
+                
+            # Check if course contains name keywords
+            if any(kw in course for kw in name_keywords):
+                courses_with_name_keywords += 1
+        
+        # If there seems to be a swap (names have course keywords, courses have name keywords)
+        if names_with_course_keywords > 0 and courses_with_name_keywords > 0:
+            st.write("WARNING: Possible column assignment issue detected. Checking tournament structure...")
+            
+            # Let's verify by checking line structure
+            # In this format, line 1 should be name, line 4 should be course-city
+            i = 0
+            while i < len(lines) and i+4 < len(lines):
+                if lines[i+4] == "Event Website":
+                    # Check if line 1 looks like a course and line 4 has a course-city pattern
+                    line1 = lines[i]
+                    line4 = lines[i+3]
+                    
+                    # Line 4 should have a city name after a dash
+                    has_city = " - " in line4
+                    line1_has_gc = "GC" in line1
+                    
+                    if line1_has_gc and has_city:
+                        # This confirms our format understanding
+                        # Line 1 is the name (even if it contains "GC")
+                        # Line 4 has "Course - City" format
+                        st.write("Confirmed format: Line 1 is name, Line 4 is 'Course - City'")
+                        break
+                i += 1
     
     # Convert to DataFrame
     if tournaments:
@@ -4884,6 +4951,11 @@ if st.button("Process Tournament Data"):
                         # Fallback to standard parsing
                         st.write("No specialized NNGA parser found, using standard format detection")
                         df = parse_tournament_text(tournament_text)
+
+                # Check for OGA format with "Event Website" pattern
+                elif "Event Website" in tournament_text:
+                    st.write("Detected OGA format - using specialized parser")
+                    df = parse_oga_format(tournament_text, year, default_state)
                 
                 # Try the improved unified Amateur Golf format parser
                 elif len(tournament_text.split('\n')) >= 10:  # Need at least 10 lines for pattern detection
