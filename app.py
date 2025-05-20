@@ -4110,13 +4110,59 @@ if st.button("Process Tournament Data"):
                 st.write("Using standard format detection")
                 df = parse_tournament_text(tournament_text)
             
-            # Rest of processing remains the same
             # Check if DataFrame is empty
             if df.empty:
                 st.error("No tournaments could be extracted from the text. Please check the format.")
                 # Create an empty DataFrame with all required columns
                 df = pd.DataFrame(columns=REQUIRED_COLUMNS)
             else:
+                # Post-processing: Enhanced column swap detection and correction
+                if 'Name' in df.columns and 'Course' in df.columns:
+                    st.write("### Performing post-processing column checks")
+                    
+                    # Get a sample of rows for analysis
+                    sample_size = min(5, len(df))
+                    sample_names = df['Name'].head(sample_size).tolist()
+                    sample_courses = df['Course'].head(sample_size).tolist()
+                    
+                    # Display what we're working with
+                    st.write("### Sample rows before potential fix:")
+                    for i in range(sample_size):
+                        st.write(f"Row {i+1}: Name='{sample_names[i]}', Course='{sample_courses[i]}'")
+                    
+                    # Define keywords
+                    course_keywords = ["Club", "Golf", "Course", "GC", "CC", "Links", "Hills"]
+                    tournament_keywords = ["Championship", "Invitational", "Amateur", "Senior", "Classic", "Open", "Four-Ball"]
+                    
+                    # Count keyword matches
+                    names_with_course_keywords = 0
+                    courses_with_tournament_keywords = 0
+                    
+                    for name in sample_names:
+                        if name and any(kw in str(name) for kw in course_keywords):
+                            names_with_course_keywords += 1
+                            
+                    for course in sample_courses:
+                        if course and any(kw in str(course) for kw in tournament_keywords):
+                            courses_with_tournament_keywords += 1
+                    
+                    st.write(f"Names with course keywords: {names_with_course_keywords}")
+                    st.write(f"Courses with tournament keywords: {courses_with_tournament_keywords}")
+                    
+                    # Force a swap if we see ANY evidence of column confusion
+                    # This is a more aggressive approach than the one in the parser
+                    if names_with_course_keywords > 0 or courses_with_tournament_keywords > 0:
+                        st.write("### FIXING COLUMNS: Swapping Name and Course columns")
+                        # Swap columns
+                        temp_name = df['Name'].copy()
+                        df['Name'] = df['Course']
+                        df['Course'] = temp_name
+                        
+                        # Log the swap
+                        st.write("### Sample rows after fix:")
+                        for i in range(sample_size):
+                            st.write(f"Row {i+1}: Name='{df.iloc[i]['Name']}', Course='{df.iloc[i]['Course']}'")
+            
                 # Show detailed information about the raw extracted data for debugging
                 st.write("### Raw Extracted Data (First few rows)")
                 display_df = df.head(5).copy()
@@ -4161,6 +4207,22 @@ if st.button("Process Tournament Data"):
                 else:
                     # Use standard column order
                     df = ensure_column_order(df)
+                
+                # LAST RESORT FORCE-SWAP (add this at the very end before displaying/download)
+                # This will swap columns if they STILL appear to be in the wrong order
+                if 'Name' in df.columns and 'Course' in df.columns and len(df) > 0:
+                    first_name = str(df.iloc[0]['Name']) if pd.notna(df.iloc[0]['Name']) else ""
+                    if any(kw in first_name for kw in ["Club", "Golf", "Course", "GC", "CC", "Links", "Hills"]):
+                        st.write("### EMERGENCY FIX: Name still appears to contain course! Last resort swap...")
+                        # Swap columns
+                        temp_name = df['Name'].copy()
+                        df['Name'] = df['Course']
+                        df['Course'] = temp_name
+                        
+                        # Show the final fix
+                        st.write("### Final rows after emergency fix:")
+                        for i in range(min(3, len(df))):
+                            st.write(f"Row {i+1}: Name='{df.iloc[i]['Name']}', Course='{df.iloc[i]['Course']}'")
             
             # Display how many tournaments were found
             st.success(f"Successfully extracted {len(df)} tournaments!")
