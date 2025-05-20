@@ -105,7 +105,7 @@ def standardize_state(state_str):
         # Check if it's a valid state code
         valid_states = set(state_dict.values())
         if state_str in valid_states:
-            return state_str
+        return state_str
         return state_str  # Return as-is if not recognized but right length
     
     # If it's a full state name or variation
@@ -852,7 +852,7 @@ def extract_date(date_range, month_map, default_year):
     # Try each pattern in order
     for pattern in patterns:
         match = re.search(pattern, date_range)
-        if match:
+    if match:
             # Extract the components based on the pattern
             if pattern == r'([A-Za-z]+)\s+(\d{4})':
                 # Format for "May 2025"
@@ -1210,7 +1210,7 @@ def parse_golf_genius_format(text, default_year="2025", default_state=None):
         # Ensure specific column order, including the new Format column
         columns = ["Date", "Name", "Course", "Format", "Category", "Gender", "City", "State", "Zip", "Notes"]
         for col in columns:
-            if col not in df.columns:
+    if col not in df.columns:
                 df[col] = None
         
         # Return DataFrame with defined column order
@@ -1359,7 +1359,7 @@ def parse_four_line_format(text):
             # Make sure we have actual content in each line
             if tournament_name and course_name and location and date_line:
                 # Parse location for city and state
-                location_match = re.search(r'(.*?),\s+([A-Z]{2})', location)
+                location_match = re.search(r'(.*?),\s+([A-Z]{2})$', location)
                 city = ""
                 state = ""
                 if location_match:
