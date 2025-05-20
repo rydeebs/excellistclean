@@ -843,6 +843,14 @@ def parse_amateur_golf_format_improved(text, default_year="2025", default_state=
             # If we don't have enough lines for a complete entry, skip
             if start_idx + 4 >= len(lines):
                 break
+            
+            # Print the actual lines for debugging
+            st.write(f"DEBUG - Block {i+1} lines:")
+            st.write(f"  Line 1: {lines[start_idx]}") 
+            st.write(f"  Line 2: {lines[start_idx+1]}")
+            st.write(f"  Line 3: {lines[start_idx+2]}")
+            st.write(f"  Line 4: {lines[start_idx+3]}")
+            st.write(f"  Line 5: {lines[start_idx+4]}")
                 
             # In the 5-line format:
             # Line 1: Course Name
@@ -850,11 +858,10 @@ def parse_amateur_golf_format_improved(text, default_year="2025", default_state=
             # Line 3: Course Name (repeated)
             # Line 4: City, State
             # Line 5: Date Range
-            
             course_name = lines[start_idx]        # First line is the course name
-            tournament_name = lines[start_idx + 1] # Second line is the tournament name
-            location = lines[start_idx + 3]        # Fourth line is location
-            date_range = lines[start_idx + 4]      # Fifth line is date range
+            tournament_name = lines[start_idx+1]  # Second line is the tournament name
+            location = lines[start_idx+3]         # Fourth line is location
+            date_range = lines[start_idx+4]       # Fifth line is date range
             
             # Extract city and state from location line
             state = default_state
@@ -954,18 +961,18 @@ def parse_amateur_golf_format_improved(text, default_year="2025", default_state=
                 
                 # Create tournament entry - make sure we correctly assign each field
                 tournament = {
-                    "Date": date_value,
-                    "Name": tournament_name,      # Tournament name from line 2
-                    "Course": course_name,        # Course name from line 1
+                    "Date": date_value,                # Date from line 5
+                    "Name": tournament_name.strip(),   # Tournament name from line 2
+                    "Course": course_name.strip(),     # Course name from line 1
                     "Category": category,
                     "Gender": gender,
-                    "City": city,                 # City from location (line 4)
-                    "State": state,               # State from location (line 4)
+                    "City": city,                      # City from location (line 4)
+                    "State": state,                    # State from location (line 4)
                     "Zip": None
                 }
                 
-                # Debug output for each parsed entry
-                st.write(f"Parsed tournament: Date={date_value}, Name={tournament_name}, Course={course_name}, City={city}, State={state}")
+                # Explicitly show what is being added to help debug
+                st.write(f"Adding tournament: Name='{tournament_name}' Course='{course_name}'")
                 
                 tournaments.append(tournament)
                 # Only print for the first few tournaments to avoid flooding the output
