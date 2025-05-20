@@ -4002,12 +4002,12 @@ def simple_logical_parser(text, default_year="2025", default_state=None):
     """
     A simple parser that follows basic logic to extract golf tournament data.
     
-    Specifically handles the pattern:
-    Line 1: Course Name (e.g., "Musgrove Mill Golf Club")
-    Line 2: Tournament Name (e.g., "South Carolina Four-Ball Championship")
-    Line 3: Course Name repeated
-    Line 4: City, State (e.g., "Clinton, SC")
-    Line 5: Date Range (e.g., "May 21, 2025 - May 25, 2025")
+    Handles the pattern:
+    Line 1: Course Name
+    Line 2: Tournament Name
+    Line 3: Course Name (may be repeated or may be missing)
+    Line 4: City, State
+    Line 5: Date Range
     
     Returns DataFrame with columns: Date, Name, Course, Category, Gender, City, State, Zip
     """
@@ -4041,28 +4041,37 @@ def simple_logical_parser(text, default_year="2025", default_state=None):
     # Create result list
     tournaments = []
     
-    # Process in 5-line blocks
+    # Process in blocks, detecting whether we have 4-line or 5-line format
     i = 0
-    while i + 4 < len(lines):
-        # Extract the 5 lines of this block
+    while i < len(lines):
         try:
-            # Define roles for each line (explicitly)
-            course_line = lines[i]
-            tournament_line = lines[i+1]
-            course_repeat_line = lines[i+2]  # This should repeat the course
-            location_line = lines[i+3]
-            date_line = lines[i+4]
+            # Check if we have a location line followed by a date line
+            is_location_line = False
+            is_date_line = False
             
-            # Debug output for this block
-            st.write(f"Processing block at line {i+1}:")
-            st.write(f"  Course: '{course_line}'")
-            st.write(f"  Tournament: '{tournament_line}'")
-            st.write(f"  Course Repeat: '{course_repeat_line}'")
-            st.write(f"  Location: '{location_line}'")
-            st.write(f"  Date: '{date_line}'")
+            # If we're near the end of the file, skip
+            if i + 3 >= len(lines):
+                break
+                
+            # Check if line i+3 looks like a location (City, ST)
+            location_match = re.search(r'(.*?),\s+([A-Z]{2})$', lines[i+3])
+            if location_match:
+                is_location_line = True
             
-            # Validate this block (course should be repeated)
-            if course_line == course_repeat_line:
+            # Check if line i+4 (if it exists) looks like a date
+            if i + 4 < len(lines):
+                date_match = re.search(r'([A-Za-z]+)\s+\d{1,2}', lines[i+4])
+                if date_match:
+                    is_date_line = True
+            
+            # We have a valid block if we find both a location and date line
+            if is_location_line and is_date_line:
+                # This is a 5-line block
+                course_line = lines[i]
+                tournament_line = lines[i+1]
+                location_line = lines[i+3]
+                date_line = lines[i+4]
+                
                 # Extract city and state from location line
                 location_match = re.search(r'(.*?),\s+([A-Z]{2})$', location_line)
                 city = None
@@ -4074,7 +4083,6 @@ def simple_logical_parser(text, default_year="2025", default_state=None):
                 
                 # Extract date
                 date_value = None
-                # Try different date formats
                 date_match = re.search(r'([A-Za-z]+)\s+(\d{1,2}),?\s+(\d{4})', date_line)
                 
                 if date_match:
@@ -4164,15 +4172,90 @@ def simple_logical_parser(text, default_year="2025", default_state=None):
                     # Add to results
                     tournaments.append(tournament)
                     st.write(f"✓ Added tournament: {tournament_line}")
-                else:
-                    st.write(f"⚠ Skipping block at line {i+1} - invalid date format: '{date_line}'")
+                
+                # Move to next block - skip 5 lines
+                i += 5
             else:
-                st.write(f"⚠ Skipping block at line {i+1} - course not repeated: '{course_line}' vs '{course_repeat_line}'")
+                # No valid block found, move forward by 1
+                i += 1
         except Exception as e:
             st.write(f"⚠ Error processing block at line {i+1}: {str(e)}")
-        
-        # Move to next block of 5 lines
-        i += 5
+            # Move forward by 1 in case of error
+            i += 1
+    
+    # Handle special cases for 4-line blocks
+    if len(tournaments) < 5:  # If we didn't find many tournaments, try again with 4-line blocks
+        st.write("Trying 4-line blocks as fallback...")
+        i = 0
+        while i + 3 < len(lines):
+            try:
+                # Check if line i+2 looks like a location line
+                location_match = re.search(r'(.*?),\s+([A-Z]{2})$', lines[i+2])
+                
+                # Check if line i+3 looks like a date line
+                date_match = re.search(r'([A-Za-z]+)\s+\d{1,2}', lines[i+3])
+                
+                if location_match and date_match:
+                    # This is a valid 4-line block
+                    tournament_line = lines[i]
+                    course_line = lines[i+1]
+                    location_line = lines[i+2]
+                    date_line = lines[i+3]
+                    
+                    # Process this block (similar to above)
+                    # Extract city and state
+                    city = location_match.group(1).strip()
+                    state = location_match.group(2).strip()
+                    
+                    # Extract date
+                    date_value = None
+                    date_full_match = re.search(r'([A-Za-z]+)\s+(\d{1,2}),?\s+(\d{4})', date_line)
+                    if date_full_match:
+                        month_name = date_full_match.group(1)
+                        day = date_full_match.group(2)
+                        year = date_full_match.group(3)
+                        month = month_map.get(month_name[:3], '01')
+                        date_value = f"{year}-{month}-{day.zfill(2)}"
+                    else:
+                        # Try date range
+                        range_match = re.search(r'([A-Za-z]+)\s+(\d{1,2})\s*-\s*(?:[A-Za-z]+\s+)?(?:\d{1,2})?,\s*(\d{4})', date_line)
+                        if range_match:
+                            month_name = range_match.group(1)
+                            day = range_match.group(2)
+                            year = range_match.group(3)
+                            month = month_map.get(month_name[:3], '01')
+                            date_value = f"{year}-{month}-{day.zfill(2)}"
+                    
+                    if date_value:
+                        # Determine category and gender (simplified)
+                        name_lower = tournament_line.lower()
+                        category = "Men's"
+                        gender = "Men's"
+                        
+                        if "women" in name_lower or "ladies" in name_lower:
+                            gender = "Women's"
+                            category = "Women's"
+                        
+                        # Create entry
+                        tournament = {
+                            "Date": date_value,
+                            "Name": tournament_line.strip(),
+                            "Course": course_line.strip(),
+                            "Category": category,
+                            "Gender": gender,
+                            "City": city,
+                            "State": state,
+                            "Zip": None
+                        }
+                        
+                        tournaments.append(tournament)
+                        st.write(f"✓ Added tournament (4-line): {tournament_line}")
+                
+                # Move forward by 4 lines
+                i += 4
+            except Exception as e:
+                st.write(f"⚠ Error processing 4-line block at line {i+1}: {str(e)}")
+                i += 1
     
     # Convert to DataFrame - with specific column ordering
     if tournaments:
