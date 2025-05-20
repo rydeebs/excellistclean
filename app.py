@@ -1702,8 +1702,8 @@ def parse_entries_close_format(text):
                                             start_pos = j + 1
                             break
         
-                                    course_name = course_location[start_pos:pos+len(indicator)].strip()
-                                    break
+                            course_name = course_location[start_pos:pos+len(indicator)].strip()
+                            break
                         
                         # If no course indicators found, use the whole string before city
                         if not course_name:
@@ -1812,7 +1812,7 @@ def parse_simple_date_club_city_format(text):
             else:
                 # No tab found, look for multiple spaces at the end
                 match = re.search(r'\s{2,}([A-Za-z\s]+)$', rest_line)
-                        if match:
+                if match:
                     city_name = match.group(1).strip()
                     course_name = rest_line[:match.start()].strip()
                 else:
@@ -1828,8 +1828,8 @@ def parse_simple_date_club_city_format(text):
                             city_name = city
                             course_name = rest_line[:-len(city)].strip()
                             city_found = True
-                                    break
-        
+                            break
+            
                     if not city_found:
                         # Can't reliably split, use the whole string as course
                         course_name = rest_line
