@@ -4116,52 +4116,143 @@ if st.button("Process Tournament Data"):
                 # Create an empty DataFrame with all required columns
                 df = pd.DataFrame(columns=REQUIRED_COLUMNS)
             else:
-                # Post-processing: Enhanced column swap detection and correction
+                # Post-processing: Special handling for the 5-line format
                 if 'Name' in df.columns and 'Course' in df.columns:
                     st.write("### Performing post-processing column checks")
                     
                     # Get a sample of rows for analysis
                     sample_size = min(5, len(df))
-                    sample_names = df['Name'].head(sample_size).tolist()
-                    sample_courses = df['Course'].head(sample_size).tolist()
                     
                     # Display what we're working with
                     st.write("### Sample rows before potential fix:")
                     for i in range(sample_size):
-                        st.write(f"Row {i+1}: Name='{sample_names[i]}', Course='{sample_courses[i]}'")
+                        if i < len(df):
+                            city_val = str(df.iloc[i].get('City', 'N/A')) if 'City' in df.columns and pd.notna(df.iloc[i].get('City')) else 'N/A'
+                            state_val = str(df.iloc[i].get('State', 'N/A')) if 'State' in df.columns and pd.notna(df.iloc[i].get('State')) else 'N/A'
+                            st.write(f"Row {i+1}: Name='{df.iloc[i]['Name']}', Course='{df.iloc[i]['Course']}', City='{city_val}', State='{state_val}'")
                     
-                    # Define keywords
-                    course_keywords = ["Club", "Golf", "Course", "GC", "CC", "Links", "Hills"]
+                    # Check for special formatting issues
+                    
+                    # Issue 1: Check if Name column contains city/state pattern like "City, ST"
+                    name_has_city_state = False
+                    if df['Name'].notna().any():
+                        name_city_state_count = sum(bool(re.search(r',\s+[A-Z]{2}$', str(name))) for name in df['Name'] if pd.notna(name))
+                        if name_city_state_count > 0:
+                            name_has_city_state = True
+                            st.write(f"WARNING: {name_city_state_count} rows have City, State pattern in Name column!")
+                    
+                    # Issue 2: Check if Course column contains tournament-like names (Championship, etc.)
+                    course_has_tournament_keywords = False
                     tournament_keywords = ["Championship", "Invitational", "Amateur", "Senior", "Classic", "Open", "Four-Ball"]
+                    if df['Course'].notna().any():
+                        course_tournament_count = sum(any(kw in str(course) for kw in tournament_keywords) 
+                                                    for course in df['Course'] if pd.notna(course))
+                        if course_tournament_count > 0:
+                            course_has_tournament_keywords = True
+                            st.write(f"WARNING: {course_tournament_count} rows have tournament keywords in Course column!")
                     
-                    # Count keyword matches
-                    names_with_course_keywords = 0
-                    courses_with_tournament_keywords = 0
-                    
-                    for name in sample_names:
-                        if name and any(kw in str(name) for kw in course_keywords):
-                            names_with_course_keywords += 1
+                    # Case 1: Location in Name column - this means the real tournament name is missing
+                    if name_has_city_state:
+                        st.write("### FIXING: City, State info incorrectly in Name column")
+                        
+                        # Parse raw text again to get the actual tournament names
+                        actual_tournaments = []
+                        lines = [line.strip() for line in tournament_text.split('\n') if line.strip()]
+                        
+                        # Parse in 5-line blocks
+                        if len(lines) % 5 == 0:
+                            st.write("Re-parsing 5-line blocks to find tournament names...")
                             
-                    for course in sample_courses:
-                        if course and any(kw in str(course) for kw in tournament_keywords):
-                            courses_with_tournament_keywords += 1
+                            for i in range(0, len(lines), 5):
+                                if i + 4 < len(lines):
+                                    # In our 5-line format, the tournament name should be line 2
+                                    course = lines[i]          # Line 1
+                                    name = lines[i+1]          # Line 2 - Tournament name
+                                    location = lines[i+3]      # Line 4 - City, State
+                                    date_text = lines[i+4]     # Line 5 - Date
+                                    
+                                    st.write(f"Block {i//5 + 1} - Course: '{course}', Name: '{name}', Location: '{location}'")
+                                    
+                                    # Extract city/state from location
+                                    city = None
+                                    state = None
+                                    location_match = re.search(r'(.*?),\s+([A-Z]{2})$', location)
+                                    if location_match:
+                                        city = location_match.group(1).strip()
+                                        state = location_match.group(2).strip()
+                                    
+                                    actual_tournaments.append({
+                                        'Course': course,
+                                        'Name': name,
+                                        'City': city,
+                                        'State': state
+                                    })
+                            
+                            # Now update the main dataframe with the correct names
+                            if len(actual_tournaments) == len(df):
+                                st.write("Updating dataframe with correct tournament names...")
+                                for i in range(len(df)):
+                                    df.at[i, 'Name'] = actual_tournaments[i]['Name']
+                                    # Also ensure City and State are correctly set
+                                    if 'City' in df.columns and 'State' in df.columns:
+                                        if pd.isna(df.at[i, 'City']) or df.at[i, 'City'] == '':
+                                            df.at[i, 'City'] = actual_tournaments[i]['City']
+                                        if pd.isna(df.at[i, 'State']) or df.at[i, 'State'] == '':
+                                            df.at[i, 'State'] = actual_tournaments[i]['State']
+                            else:
+                                st.write(f"WARNING: Count mismatch - {len(actual_tournaments)} found vs {len(df)} in dataframe")
+                                # Still try to extract city/state info from name column
+                                for i in range(len(df)):
+                                    name_value = str(df.iloc[i]['Name']) if pd.notna(df.iloc[i]['Name']) else ""
+                                    city_state_match = re.search(r'(.*?),\s+([A-Z]{2})$', name_value)
+                                    
+                                    if city_state_match:
+                                        city = city_state_match.group(1).strip()
+                                        state = city_state_match.group(2).strip()
+                                        
+                                        # Update City and State columns
+                                        if 'City' in df.columns and 'State' in df.columns:
+                                            df.at[i, 'City'] = city
+                                            df.at[i, 'State'] = state
+                                        
+                                        # Set a placeholder name
+                                        course = str(df.iloc[i]['Course']) if pd.notna(df.iloc[i]['Course']) else ""
+                                        df.at[i, 'Name'] = f"{course} Tournament"
+                        else:
+                            st.write(f"WARNING: Line count not divisible by 5 ({len(lines)} lines)")
+                            # Extract city/state from Name column anyway
+                            for i in range(len(df)):
+                                name_value = str(df.iloc[i]['Name']) if pd.notna(df.iloc[i]['Name']) else ""
+                                city_state_match = re.search(r'(.*?),\s+([A-Z]{2})$', name_value)
+                                
+                                if city_state_match:
+                                    city = city_state_match.group(1).strip()
+                                    state = city_state_match.group(2).strip()
+                                    
+                                    # Update City and State columns
+                                    if 'City' in df.columns and 'State' in df.columns:
+                                        df.at[i, 'City'] = city
+                                        df.at[i, 'State'] = state
+                                    
+                                    # Use a combination of course and city for name
+                                    course = str(df.iloc[i]['Course']) if pd.notna(df.iloc[i]['Course']) else ""
+                                    df.at[i, 'Name'] = f"{course} - {city} Tournament"
                     
-                    st.write(f"Names with course keywords: {names_with_course_keywords}")
-                    st.write(f"Courses with tournament keywords: {courses_with_tournament_keywords}")
-                    
-                    # Force a swap if we see ANY evidence of column confusion
-                    # This is a more aggressive approach than the one in the parser
-                    if names_with_course_keywords > 0 or courses_with_tournament_keywords > 0:
-                        st.write("### FIXING COLUMNS: Swapping Name and Course columns")
-                        # Swap columns
+                    # Case 2: Name and Course are swapped
+                    elif course_has_tournament_keywords:
+                        st.write("### FIXING: Name and Course columns are swapped")
+                        # Swap the columns
                         temp_name = df['Name'].copy()
                         df['Name'] = df['Course']
                         df['Course'] = temp_name
-                        
-                        # Log the swap
-                        st.write("### Sample rows after fix:")
-                        for i in range(sample_size):
-                            st.write(f"Row {i+1}: Name='{df.iloc[i]['Name']}', Course='{df.iloc[i]['Course']}'")
+                    
+                    # Show the results after fixes
+                    st.write("### Sample rows after fix:")
+                    for i in range(sample_size):
+                        if i < len(df):
+                            city_val = str(df.iloc[i].get('City', 'N/A')) if 'City' in df.columns and pd.notna(df.iloc[i].get('City')) else 'N/A'
+                            state_val = str(df.iloc[i].get('State', 'N/A')) if 'State' in df.columns and pd.notna(df.iloc[i].get('State')) else 'N/A'
+                            st.write(f"Row {i+1}: Name='{df.iloc[i]['Name']}', Course='{df.iloc[i]['Course']}', City='{city_val}', State='{state_val}'")
             
                 # Show detailed information about the raw extracted data for debugging
                 st.write("### Raw Extracted Data (First few rows)")
@@ -4207,22 +4298,6 @@ if st.button("Process Tournament Data"):
                 else:
                     # Use standard column order
                     df = ensure_column_order(df)
-                
-                # LAST RESORT FORCE-SWAP (add this at the very end before displaying/download)
-                # This will swap columns if they STILL appear to be in the wrong order
-                if 'Name' in df.columns and 'Course' in df.columns and len(df) > 0:
-                    first_name = str(df.iloc[0]['Name']) if pd.notna(df.iloc[0]['Name']) else ""
-                    if any(kw in first_name for kw in ["Club", "Golf", "Course", "GC", "CC", "Links", "Hills"]):
-                        st.write("### EMERGENCY FIX: Name still appears to contain course! Last resort swap...")
-                        # Swap columns
-                        temp_name = df['Name'].copy()
-                        df['Name'] = df['Course']
-                        df['Course'] = temp_name
-                        
-                        # Show the final fix
-                        st.write("### Final rows after emergency fix:")
-                        for i in range(min(3, len(df))):
-                            st.write(f"Row {i+1}: Name='{df.iloc[i]['Name']}', Course='{df.iloc[i]['Course']}'")
             
             # Display how many tournaments were found
             st.success(f"Successfully extracted {len(df)} tournaments!")
