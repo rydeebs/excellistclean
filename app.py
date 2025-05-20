@@ -3877,6 +3877,204 @@ def parse_golf_genius_format(text, default_year="2025", default_state=None):
         st.write("Golf Genius Parser: No tournaments found")
         return pd.DataFrame(columns=["Date", "Name", "Course", "Category", "Gender", "City", "State", "Zip"])
 
+def parse_golf_association_format(text, default_year="2025", default_state=None):
+    """
+    Parser for Golf Association format with tournament information and logos.
+    
+    Format example:
+    Ohio Golf Association Logo (logo, not applicable)
+    Ohio Amateur Qualifier (Name)
+    Ohio Golf Association (association, not applicable)
+    May 27, 2025 (Tuesday) (Date)
+    NCR Country Club (Course)
+    North Course (course description, not applicable)
+    Mens & Womens (Gender)
+    HC <= 5.4 (handicap, not applicable)
+    Registration Closed (not applicable) 
+    View Entry Information (not applicable)
+    
+    Returns a DataFrame with tournament data.
+    """
+    import re
+    import pandas as pd
+    
+    # Month mapping for date conversion
+    month_map = {
+        'January': '01', 'February': '02', 'March': '03', 'April': '04',
+        'May': '05', 'June': '06', 'July': '07', 'August': '08',
+        'September': '09', 'October': '10', 'November': '11', 'December': '12',
+        'Jan': '01', 'Feb': '02', 'Mar': '03', 'Apr': '04',
+        'May': '05', 'Jun': '06', 'Jul': '07', 'Aug': '08',
+        'Sep': '09', 'Oct': '10', 'Nov': '11', 'Dec': '12'
+    }
+    
+    # Process the lines
+    lines = [line.strip() for line in text.split('\n') if line.strip()]
+    
+    # Display first 20 lines for debugging
+    st.write("First 20 lines for debugging (Golf Association format):")
+    for i in range(min(20, len(lines))):
+        st.write(f"Line {i+1}: '{lines[i]}'")
+    
+    # Tournament entries to collect
+    tournaments = []
+    
+    # Process the lines to identify tournaments
+    i = 0
+    while i < len(lines):
+        try:
+            # Look for patterns that indicate the start of a tournament listing
+            is_tournament_start = False
+            
+            # Check if this line contains "Logo" and is followed by a tournament name
+            if "Logo" in lines[i] and i + 1 < len(lines) and not "Logo" in lines[i+1]:
+                is_tournament_start = True
+            
+            # Check if this is a USGA qualifier which might have a different pattern
+            if not is_tournament_start and i + 2 < len(lines) and "Qualifier" in lines[i] and "Association" in lines[i+1]:
+                is_tournament_start = True
+            
+            if is_tournament_start:
+                # Skip the Logo line
+                i += 1
+                
+                # Next line should be tournament name
+                tournament_name = lines[i]
+                i += 1
+                
+                # Skip association line
+                if "Association" in lines[i]:
+                    i += 1
+                
+                # Next line should have the date
+                date_line = lines[i] if i < len(lines) else ""
+                i += 1
+                
+                # Next line is usually the course
+                course_line = lines[i] if i < len(lines) else ""
+                i += 1
+                
+                # Check if the next line is a course description/details
+                if i < len(lines) and not any(x in lines[i] for x in ["Registration", "View", "Logo", "HC", "Mens", "Womens", "Ages"]):
+                    # This is probably a course description, skip it
+                    i += 1
+                
+                # The next line(s) may have gender information
+                gender_line = None
+                if i < len(lines):
+                    if "Mens" in lines[i] or "Womens" in lines[i]:
+                        gender_line = lines[i]
+                        i += 1
+                
+                # Skip handicap, age requirements and other conditions
+                while i < len(lines) and ("HC" in lines[i] or "Ages" in lines[i] or 
+                                         "Must be" in lines[i] or "Yardage:" in lines[i]):
+                    i += 1
+                
+                # Skip registration status lines
+                while i < len(lines) and ("Registration" in lines[i] or "ended" in lines[i] or 
+                                         "View Entry" in lines[i]):
+                    i += 1
+                
+                # Process the date
+                date_value = None
+                date_match = re.search(r'([A-Za-z]+)\s+(\d{1,2}),\s+(\d{4})', date_line)
+                
+                if date_match:
+                    month_name = date_match.group(1)
+                    day = date_match.group(2)
+                    year = date_match.group(3)
+                    
+                    # Get month number
+                    month = month_map.get(month_name, '01')
+                    
+                    # Format date
+                    date_value = f"{year}-{month}-{day.zfill(2)}"
+                else:
+                    # Try alternative date format without comma
+                    alt_match = re.search(r'([A-Za-z]+)\s+(\d{1,2})\s+\d{4}', date_line)
+                    if alt_match:
+                        month_name = alt_match.group(1)
+                        day = alt_match.group(2)
+                        
+                        # Extract year separately
+                        year_match = re.search(r'(\d{4})', date_line)
+                        year = year_match.group(1) if year_match else default_year
+                        
+                        # Get month number
+                        month = month_map.get(month_name, '01')
+                        
+                        # Format date
+                        date_value = f"{year}-{month}-{day.zfill(2)}"
+                
+                # Determine gender based on the gender line
+                gender = "Men's"  # Default
+                if gender_line:
+                    if "Womens" in gender_line and "Mens" not in gender_line:
+                        gender = "Women's"
+                    elif "Womens" in gender_line and "Mens" in gender_line:
+                        gender = "Mixed"
+                
+                # Also check tournament name for gender clues
+                name_lower = tournament_name.lower()
+                if "women" in name_lower or "girls" in name_lower or "ladies" in name_lower:
+                    gender = "Women's"
+                
+                # Determine category based on tournament name
+                category = "Men's"  # Default
+                if "amateur" in name_lower:
+                    category = "Amateur"
+                elif "open" in name_lower:
+                    category = "Open"
+                elif "junior" in name_lower or "girls" in name_lower:
+                    category = "Junior's"
+                elif "mid-am" in name_lower or "mid am" in name_lower:
+                    category = "Mid-Amateur"
+                elif "senior" in name_lower:
+                    category = "Seniors"
+                elif "qualifier" in name_lower:
+                    category = "Qualifier"
+                
+                # If we have valid core data, create an entry
+                if date_value and tournament_name and course_line:
+                    tournament = {
+                        "Date": date_value,
+                        "Name": tournament_name.strip(),
+                        "Course": course_line.strip(),
+                        "Category": category,
+                        "Gender": gender,
+                        "City": None,  # No city info in this format
+                        "State": default_state,
+                        "Zip": None
+                    }
+                    
+                    tournaments.append(tournament)
+                    st.write(f"✓ Added tournament: {tournament_name}")
+            else:
+                # Not a tournament start, move to next line
+                i += 1
+        except Exception as e:
+            st.write(f"⚠ Error processing line {i+1}: {str(e)}")
+            i += 1  # Move forward in case of error
+    
+    # Convert to DataFrame
+    if tournaments:
+        st.write(f"Golf Association Parser: Found {len(tournaments)} tournaments")
+        df = pd.DataFrame(tournaments)
+        
+        # Ensure specific column order
+        columns = ["Date", "Name", "Course", "Category", "Gender", "City", "State", "Zip"]
+        for col in columns:
+            if col not in df.columns:
+                df[col] = None
+        
+        # Return DataFrame with defined column order
+        return df[columns]
+    else:
+        # Return empty DataFrame with required columns
+        st.write("Golf Association Parser: No tournaments found")
+        return pd.DataFrame(columns=["Date", "Name", "Course", "Category", "Gender", "City", "State", "Zip"])
+
 def parse_day_month_tournament_format(text, year="2025", default_state=None):
     """
     Parser for format with this pattern:
@@ -4492,18 +4690,22 @@ def ensure_column_order(df):
 if st.button("Process Tournament Data"):
     if tournament_text:
         try:
-            # First, try our simple logical parser for the specific 5-line format
+            # First try our simple logical parser for the specific 5-line format
             st.write("Trying simple logical parser first...")
             df = simple_logical_parser(tournament_text, year, default_state)
             
             if not df.empty:
                 st.write(f"Successfully parsed {len(df)} tournaments using simple logical parser")
             else:
-                # If the simple parser doesn't work, fall back to other parsers
-                st.write("Simple parser didn't find any tournaments. Trying other parsers...")
+                # If the simple parser doesn't work, try the other parsers
                 
-                # Try to detect Golf Genius format first (has "View" lines and a specific pattern)
-                if "View" in tournament_text and ("OPEN" in tournament_text or "OPENS" in tournament_text or "closes on" in tournament_text):
+                # Check for Golf Association format with Logo and "Association" patterns
+                if "Logo" in tournament_text and "Association" in tournament_text:
+                    st.write("Detected Golf Association format - using specialized parser")
+                    df = parse_golf_association_format(tournament_text, year, default_state)
+                
+                # Try to detect Golf Genius format
+                elif "View" in tournament_text and ("OPEN" in tournament_text or "OPENS" in tournament_text or "closes on" in tournament_text):
                     st.write("Detected Golf Genius format - using specialized parser")
                     df = parse_golf_genius_format(tournament_text, year, default_state)
                 
