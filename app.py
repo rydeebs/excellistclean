@@ -4075,6 +4075,169 @@ def parse_golf_association_format(text, default_year="2025", default_state=None)
         st.write("Golf Association Parser: No tournaments found")
         return pd.DataFrame(columns=["Date", "Name", "Course", "Category", "Gender", "City", "State", "Zip"])
 
+def parse_oga_format(text, default_year="2025", default_state=None):
+    """
+    Parser for Oregon Golf Association (OGA) event format.
+    
+    Format example:
+    Individual Series - Salem GC (Name)
+    May 28 (Date)
+    Individual Series - Salem GC (Name)
+    Salem GC - Salem (Course - City)
+    Event Website (not applicable)
+    
+    Returns a DataFrame with tournament data.
+    """
+    import re
+    import pandas as pd
+    
+    # Month mapping for date conversion
+    month_map = {
+        'January': '01', 'February': '02', 'March': '03', 'April': '04',
+        'May': '05', 'June': '06', 'July': '07', 'August': '08',
+        'September': '09', 'October': '10', 'November': '11', 'December': '12',
+        'Jan': '01', 'Feb': '02', 'Mar': '03', 'Apr': '04',
+        'May': '05', 'Jun': '06', 'Jul': '07', 'Aug': '08',
+        'Sep': '09', 'Oct': '10', 'Nov': '11', 'Dec': '12'
+    }
+    
+    # Process the lines
+    lines = [line.strip() for line in text.split('\n') if line.strip()]
+    
+    # Display first 15 lines for debugging
+    st.write("First 15 lines for debugging (OGA format):")
+    for i in range(min(15, len(lines))):
+        st.write(f"Line {i+1}: '{lines[i]}'")
+    
+    # Tournament entries to collect
+    tournaments = []
+    
+    # Process the lines to identify tournaments - typically in 5-line blocks
+    i = 0
+    while i < len(lines):
+        try:
+            # Check if we have at least 5 lines left (a complete block)
+            if i + 4 >= len(lines):
+                break
+                
+            # Check if the pattern looks like an OGA tournament block
+            # Pattern: Name, Date, Name repeated, Course-City, Event Website
+            if lines[i+4] == "Event Website":
+                # This looks like an OGA tournament block
+                tournament_name = lines[i]
+                date_line = lines[i+1]
+                course_city_line = lines[i+3]
+                
+                # Extract date
+                date_value = None
+                
+                # Check for date range format (e.g., "May 31 - June 1")
+                date_range_match = re.search(r'([A-Za-z]+)\s+(\d{1,2})\s*-\s*([A-Za-z]+)\s+(\d{1,2})', date_line)
+                
+                if date_range_match:
+                    # Use the start date from the range
+                    month_name = date_range_match.group(1)
+                    day = date_range_match.group(2)
+                    
+                    # Get month number
+                    month = month_map.get(month_name, '01')
+                    
+                    # Format date
+                    date_value = f"{default_year}-{month}-{day.zfill(2)}"
+                else:
+                    # Check for simple date format (e.g., "May 28")
+                    simple_date_match = re.search(r'([A-Za-z]+)\s+(\d{1,2})', date_line)
+                    
+                    if simple_date_match:
+                        month_name = simple_date_match.group(1)
+                        day = simple_date_match.group(2)
+                        
+                        # Get month number
+                        month = month_map.get(month_name, '01')
+                        
+                        # Format date
+                        date_value = f"{default_year}-{month}-{day.zfill(2)}"
+                
+                # Extract course and city
+                course = None
+                city = None
+                
+                # Course-City format: "Course - City"
+                course_city_match = re.search(r'(.*?)\s+-\s+(.*?)$', course_city_line)
+                
+                if course_city_match:
+                    course = course_city_match.group(1).strip()
+                    city = course_city_match.group(2).strip()
+                else:
+                    # If no clear separator, use the whole line as course
+                    course = course_city_line
+                
+                # Determine category and gender based on tournament name
+                name_lower = tournament_name.lower()
+                category = "Men's"  # Default
+                gender = "Men's"    # Default
+                
+                # Category detection
+                if "amateur" in name_lower:
+                    category = "Amateur"
+                elif "senior" in name_lower:
+                    category = "Seniors"
+                elif "junior" in name_lower:
+                    category = "Junior's"
+                elif "championship" in name_lower or "champions" in name_lower:
+                    category = "Championship"
+                elif "qualifier" in name_lower:
+                    category = "Qualifier"
+                
+                # Gender detection
+                if "women" in name_lower or "ladies" in name_lower:
+                    gender = "Women's"
+                elif "mixed" in name_lower or "couples" in name_lower:
+                    gender = "Mixed"
+                
+                # If we have valid core data, create an entry
+                if date_value and tournament_name and course:
+                    tournament = {
+                        "Date": date_value,
+                        "Name": tournament_name.strip(),
+                        "Course": course,
+                        "Category": category,
+                        "Gender": gender,
+                        "City": city,
+                        "State": default_state,
+                        "Zip": None
+                    }
+                    
+                    tournaments.append(tournament)
+                    st.write(f"✓ Added tournament: {tournament_name}")
+                
+                # Move to the next block (skip 5 lines)
+                i += 5
+            else:
+                # Not a recognizable block, move to next line
+                i += 1
+        except Exception as e:
+            st.write(f"⚠ Error processing line {i+1}: {str(e)}")
+            i += 1  # Move forward in case of error
+    
+    # Convert to DataFrame
+    if tournaments:
+        st.write(f"OGA Parser: Found {len(tournaments)} tournaments")
+        df = pd.DataFrame(tournaments)
+        
+        # Ensure specific column order
+        columns = ["Date", "Name", "Course", "Category", "Gender", "City", "State", "Zip"]
+        for col in columns:
+            if col not in df.columns:
+                df[col] = None
+        
+        # Return DataFrame with defined column order
+        return df[columns]
+    else:
+        # Return empty DataFrame with required columns
+        st.write("OGA Parser: No tournaments found")
+        return pd.DataFrame(columns=["Date", "Name", "Course", "Category", "Gender", "City", "State", "Zip"])
+
 def parse_day_month_tournament_format(text, year="2025", default_state=None):
     """
     Parser for format with this pattern:
