@@ -5153,13 +5153,8 @@ if st.button("Process Tournament Data"):
         try:
             # First, try to detect specific formats that have clear signatures
             
-            # Check for VSGA format (Virginia State Golf Association)
-            if "VSGA" in tournament_text or (re.search(r'\d{4}\s+VSGA', tournament_text) and ", VA" in tournament_text):
-                st.write("Detected VSGA format - using specialized parser")
-                df = parse_vsga_format(tournament_text, year, default_state)
-                
             # Check for OGA format with "Event Website" pattern
-            elif "Event Website" in tournament_text:
+            if "Event Website" in tournament_text:
                 st.write("Detected OGA format - using specialized parser")
                 df = parse_oga_format(tournament_text, year, default_state)
             
